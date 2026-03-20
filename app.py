@@ -416,6 +416,7 @@ body{
       </div>
       <h3 class="card-title">Team Stats</h3>
       <p class="card-desc">Full team batting and pitching stats dashboard with leaderboards and Synergy scouting.</p>
+      <p style="font-size:12px;color:#C5A55A;margin-top:6px;">Login: <strong>moeller</strong> &nbsp;|&nbsp; Password: <strong>moeller1</strong></p>
       <a href="https://moeller-2026-stats-production.up.railway.app/login" target="_blank" class="card-btn">
         Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
       </a>
