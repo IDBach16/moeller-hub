@@ -366,9 +366,9 @@ body{
       <div class="card-icon">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
       </div>
-      <h3 class="card-title">Game Prep Agent</h3>
-      <p class="card-desc">AI-powered scouting reports and game plans. Ask about any opponent, pitcher, or hitter.</p>
-      <a href="https://moeller-scouting-agent-production.up.railway.app" target="_blank" class="card-btn">
+      <h3 class="card-title">Scouting Agent</h3>
+      <p class="card-desc">Our scouting tool that allows you to ask questions and get information from the data we have collected.</p>
+      <a href="https://web-production-510f.up.railway.app/" target="_blank" class="card-btn">
         Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
       </a>
     </div>
@@ -379,8 +379,8 @@ body{
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M8 2s1.5 2 4 2 4-2 4-2"/></svg>
       </div>
       <h3 class="card-title">Pitcher Cards</h3>
-      <p class="card-desc">Individual pitcher game reports with movement plots, pitch data, and MoeStuff+ grades.</p>
-      <a href="https://moeller-pitcher-cards-production.up.railway.app" target="_blank" class="card-btn">
+      <p class="card-desc">Pitcher information and updates for quick reference before and during games.</p>
+      <a href="https://web-production-08767.up.railway.app/" target="_blank" class="card-btn">
         Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
       </a>
     </div>
@@ -391,8 +391,8 @@ body{
         <svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M4 20V10l4-6h8l4 6v10"/><rect x="8" y="12" width="8" height="8" rx="1"/><line x1="12" y1="12" x2="12" y2="8"/></svg>
       </div>
       <h3 class="card-title">Hitter Cards</h3>
-      <p class="card-desc">Weekly hitter report cards with plate discipline, zone heatmaps, and MoeSwing+ scores.</p>
-      <a href="https://moeller-hitter-cards-production.up.railway.app" target="_blank" class="card-btn">
+      <p class="card-desc">Hitter information and updates that can be used for player evaluation, planning, and in-game reference.</p>
+      <a href="https://web-production-51eb5b.up.railway.app/" target="_blank" class="card-btn">
         Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
       </a>
     </div>
@@ -403,8 +403,8 @@ body{
         <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
       </div>
       <h3 class="card-title">Umpire Cards</h3>
-      <p class="card-desc">Umpire scouting cards with zone tendencies, called strike rates, and game-by-game logs.</p>
-      <a href="https://moeller-umpire-cards-production.up.railway.app" target="_blank" class="card-btn">
+      <p class="card-desc">Quick reference tool for umpire information and game-use situations.</p>
+      <a href="https://web-production-196103.up.railway.app/" target="_blank" class="card-btn">
         Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
       </a>
     </div>
