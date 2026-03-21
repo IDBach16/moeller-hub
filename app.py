@@ -30,6 +30,10 @@ def logo():
 def favicon():
     return send_from_directory(APP_DIR, "moeller-logo.png")
 
+@app.route("/manifest.json")
+def manifest():
+    return send_from_directory(APP_DIR, "manifest.json")
+
 # ---------------------------------------------------------------------------
 # Git push endpoint
 # ---------------------------------------------------------------------------
@@ -65,6 +69,12 @@ HTML = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Moeller Baseball Analytics</title>
 <link rel="icon" href="/moeller-logo.png"/>
+<link rel="apple-touch-icon" href="/moeller-logo.png"/>
+<link rel="manifest" href="/manifest.json"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Moeller Baseball"/>
+<meta name="theme-color" content="#1a1a2e"/>
 <style>
 /* ===== RESET & BASE ===== */
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
