@@ -439,7 +439,7 @@ body{
       </div>
       <h3 class="card-title">AWRE Video Search</h3>
       <p class="card-desc">Search game video by team, player, pitch type, and result. Filter 9,600+ pitches across 45 games with multi-angle playback.</p>
-      <a href="https://moeller-awre-video-production.up.railway.app" target="_blank" class="card-btn">
+      <a href="https://web-production-12b79.up.railway.app/" target="_blank" class="card-btn">
         Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
       </a>
     </div>
