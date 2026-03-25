@@ -434,12 +434,11 @@ body{
 
     <!-- 6. AWRE Video Search -->
     <div class="card">
-      <span class="badge">Coming Soon</span>
       <div class="card-icon">
         <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       </div>
       <h3 class="card-title">AWRE Video Search</h3>
-      <p class="card-desc">Search game video by team, player, pitch type, and result. Find any clip in seconds.</p>
+      <p class="card-desc">Search game video by team, player, pitch type, and result. Filter 9,600+ pitches across 45 games with multi-angle playback.</p>
       <a href="https://moeller-awre-video-production.up.railway.app" target="_blank" class="card-btn">
         Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
       </a>
