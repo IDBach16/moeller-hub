@@ -444,6 +444,18 @@ body{
       </a>
     </div>
 
+    <!-- 7. Pitch Overlays -->
+    <div class="card">
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><path d="M7 10l3 3 7-7" stroke-width="2"/></svg>
+      </div>
+      <h3 class="card-title">Pitch Overlays</h3>
+      <p class="card-desc">Delivery overlay comparisons by pitcher. Side-by-side and stacked views synced to release point for mechanical analysis.</p>
+      <a href="https://drive.google.com/drive/folders/17YNpzWkcwCum-Nn_uG-wwdVTwSJmttLY?usp=sharing" target="_blank" class="card-btn">
+        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+      </a>
+    </div>
+
   </div>
 </section>
 
