@@ -451,7 +451,7 @@ body{
       </div>
       <h3 class="card-title">Pitch Overlays</h3>
       <p class="card-desc">Delivery overlay comparisons by pitcher. Side-by-side and stacked views synced to release point for mechanical analysis.</p>
-      <a href="https://drive.google.com/drive/folders/17YNpzWkcwCum-Nn_uG-wwdVTwSJmttLY?usp=sharing" target="_blank" class="card-btn">
+      <a href="https://drive.google.com/drive/folders/1gruNdqaNpmhgRp2_4qdidSIRP12vnfkh?usp=sharing" target="_blank" class="card-btn">
         Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
       </a>
     </div>
