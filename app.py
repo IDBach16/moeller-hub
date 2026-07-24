@@ -5,10 +5,134 @@ Central landing page for all Moeller Baseball analytics tools.
 
 import os
 import subprocess
-from flask import Flask, render_template_string, send_from_directory, jsonify, request
+from datetime import timedelta
+from flask import (Flask, render_template_string, send_from_directory,
+                   jsonify, request, session, redirect, url_for)
 
 app = Flask(__name__)
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ---------------------------------------------------------------------------
+# Password gate
+# ---------------------------------------------------------------------------
+
+app.secret_key = os.environ.get("SECRET_KEY", "moeller-hub-2027-secret")
+app.permanent_session_lifetime = timedelta(days=30)
+
+HUB_PASSWORD = os.environ.get("HUB_PASSWORD", "Held_2027")
+
+# routes that never require login (assets used by the login page itself)
+PUBLIC_PATHS = {"/login", "/bg-field.jpg", "/shield.png", "/moeller-logo.png",
+                "/favicon.ico", "/manifest.json"}
+
+@app.before_request
+def require_login():
+    if request.path in PUBLIC_PATHS:
+        return None
+    if not session.get("authed"):
+        return redirect(url_for("login"))
+    return None
+
+LOGIN_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Moeller Baseball Analytics — Login</title>
+<link rel="icon" href="/moeller-logo.png"/>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --navy:#1a1a2e; --navy-deep:#0f0f1e;
+  --gold:#C5A55A; --gold-light:#d4ba78;
+  --white:#ffffff;
+  --glass:rgba(26,26,46,.65); --glass-border:rgba(197,165,90,.25);
+}
+body{
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:var(--navy-deep);color:var(--white);
+}
+body::before{
+  content:'';position:fixed;inset:0;
+  background:url('/bg-field.jpg') center/cover no-repeat;
+  filter:brightness(.3) saturate(.8);z-index:0;
+}
+.login-card{
+  position:relative;z-index:1;
+  width:min(400px,90vw);
+  background:var(--glass);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border:1px solid var(--glass-border);
+  border-radius:16px;
+  padding:2.5rem 2rem;
+  text-align:center;
+  box-shadow:0 20px 60px rgba(0,0,0,.5);
+}
+.login-card img{
+  width:90px;height:90px;object-fit:contain;margin-bottom:1rem;
+  filter:drop-shadow(0 0 25px rgba(197,165,90,.4));
+}
+.login-title{
+  font-size:1.1rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase;
+  background:linear-gradient(135deg,var(--white),var(--gold),var(--white));
+  background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  margin-bottom:.4rem;
+}
+.login-sub{
+  font-size:.7rem;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--gold);opacity:.85;margin-bottom:1.8rem;
+}
+input[type=password]{
+  width:100%;padding:.85rem 1rem;
+  background:rgba(15,15,30,.7);
+  border:1px solid var(--glass-border);
+  border-radius:8px;color:var(--white);
+  font-size:1rem;letter-spacing:.05em;
+  outline:none;margin-bottom:1rem;
+  transition:border-color .3s ease;
+}
+input[type=password]:focus{border-color:var(--gold)}
+button{
+  width:100%;padding:.85rem 1rem;
+  background:transparent;border:1.5px solid var(--gold);border-radius:8px;
+  color:var(--gold);font-size:.85rem;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;cursor:pointer;
+  transition:all .3s ease;
+}
+button:hover{background:var(--gold);color:var(--navy)}
+.err{
+  color:#e37f7f;font-size:.8rem;margin-bottom:1rem;letter-spacing:.03em;
+}
+</style>
+</head>
+<body>
+<form class="login-card" method="POST" action="/login">
+  <img src="/shield.png" alt="Moeller Shield"/>
+  <div class="login-title">Moeller Baseball Analytics</div>
+  <div class="login-sub">Coaches Access</div>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <input type="password" name="password" placeholder="Password" autofocus required/>
+  <button type="submit">Enter</button>
+</form>
+</body>
+</html>"""
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        if request.form.get("password") == HUB_PASSWORD:
+            session.permanent = True
+            session["authed"] = True
+            return redirect(url_for("index"))
+        error = "Incorrect password"
+    return render_template_string(LOGIN_HTML, error=error)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 # ---------------------------------------------------------------------------
 # Static file routes
