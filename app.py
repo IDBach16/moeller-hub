@@ -568,7 +568,19 @@ body{
       </a>
     </div>
 
-    <!-- 7. Pitch Overlays -->
+    <!-- 7. Charting App -->
+    <div class="card">
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 4.5c2 3 2 12 0 15"/><path d="M15.5 4.5c-2 3-2 12 0 15"/></svg>
+      </div>
+      <h3 class="card-title">Charting App</h3>
+      <p class="card-desc">Pitch-by-pitch charting for off-season bullpens and live ABs. Tap the attack zone, log the pitch, and the coach dashboard updates behind it.</p>
+      <a href="https://moeller-charting-production.up.railway.app/" target="_blank" class="card-btn">
+        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+      </a>
+    </div>
+
+    <!-- 8. Pitch Overlays -->
     <div class="card">
       <div class="card-icon">
         <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><path d="M7 10l3 3 7-7" stroke-width="2"/></svg>
