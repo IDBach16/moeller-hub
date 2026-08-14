@@ -19,7 +19,8 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 app.secret_key = os.environ.get("SECRET_KEY", "moeller-hub-2027-secret")
 app.permanent_session_lifetime = timedelta(days=30)
 
-HUB_PASSWORD = os.environ.get("HUB_PASSWORD", "Held_2027")
+# Empty = no gate. To require a password again, set HUB_PASSWORD on Railway.
+HUB_PASSWORD = os.environ.get("HUB_PASSWORD", "")
 
 # routes that never require login (assets used by the login page itself)
 PUBLIC_PATHS = {"/login", "/bg-field.jpg", "/shield.png", "/moeller-logo.png",
@@ -27,6 +28,8 @@ PUBLIC_PATHS = {"/login", "/bg-field.jpg", "/shield.png", "/moeller-logo.png",
 
 @app.before_request
 def require_login():
+    if not HUB_PASSWORD:
+        return None
     if request.path in PUBLIC_PATHS:
         return None
     if not session.get("authed"):
@@ -120,6 +123,8 @@ button:hover{background:var(--gold);color:var(--navy)}
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if not HUB_PASSWORD:
+        return redirect(url_for("index"))
     error = None
     if request.method == "POST":
         if request.form.get("password") == HUB_PASSWORD:
@@ -164,6 +169,10 @@ def manifest():
 
 @app.route("/api/git-push", methods=["POST"])
 def git_push():
+    # The password gate is what kept this endpoint private. With the gate off,
+    # it must not be reachable at all.
+    if not HUB_PASSWORD:
+        return jsonify({"ok": False, "error": "disabled while the password gate is off"}), 403
     try:
         result = subprocess.run(
             ["git", "add", "-A"],
