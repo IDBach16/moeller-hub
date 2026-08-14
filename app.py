@@ -510,6 +510,28 @@ body{
   </div>
 </section>
 
+<!-- ====== COACH ASSISTANT ====== -->
+<section class="section ca-sec" id="assistant">
+  <p class="section-label">Ask The Data</p>
+  <h2 class="section-title">Coach Assistant</h2>
+  <div class="ca-box">
+    <div class="ca-msgs" id="caMsgs">
+      <div class="ca-hint">
+        <p>Ask anything about Moeller baseball — season stats, pitchers, hitters, bullpens.</p>
+        <div class="ca-chips">
+          <span class="ca-chip">Who led the team in AVG in 2026?</span>
+          <span class="ca-chip">What was Jack Ujvagi&rsquo;s best pitch?</span>
+          <span class="ca-chip">How do our off-season bullpens look?</span>
+        </div>
+      </div>
+    </div>
+    <div class="ca-input">
+      <input type="text" id="caText" placeholder="Ask about Moeller data…" maxlength="500"/>
+      <button id="caSend">Ask</button>
+    </div>
+  </div>
+</section>
+
 <!-- ====== TOOLS SECTION ====== -->
 <section class="section" id="tools">
   <p class="section-label">Analytics Suite</p>
@@ -622,93 +644,66 @@ body{
   Moeller Baseball Analytics <span>|</span> @MoeAnalytics
 </footer>
 
-<!-- ====== COACH ASSISTANT ====== -->
+<!-- ====== COACH ASSISTANT (styles + logic; markup sits mid-page) ====== -->
 <style>
-.ca-fab{
-  position:fixed;right:1.4rem;bottom:1.4rem;z-index:120;
-  width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;
-  background:linear-gradient(135deg,var(--gold),var(--gold-light));
-  color:var(--navy);font-size:1.6rem;display:flex;align-items:center;justify-content:center;
-  box-shadow:0 8px 30px rgba(197,165,90,.45);transition:transform .2s;
-}
-.ca-fab:hover{transform:scale(1.08)}
-.ca-panel{
-  position:fixed;right:1.4rem;bottom:5.6rem;z-index:120;
-  width:min(400px,calc(100vw - 2rem));height:min(560px,calc(100vh - 8rem));
-  display:none;flex-direction:column;
-  background:rgba(15,15,30,.92);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+.ca-sec{max-width:860px;padding:3.5rem 1.5rem 0}
+.ca-box{
+  background:var(--glass);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
   border:1px solid var(--glass-border);border-radius:16px;overflow:hidden;
-  box-shadow:0 24px 70px rgba(0,0,0,.6);
+  box-shadow:0 16px 50px rgba(0,0,0,.35);
 }
-.ca-panel.open{display:flex}
-.ca-head{
-  padding:.85rem 1.1rem;border-bottom:1px solid var(--glass-border);
-  display:flex;align-items:center;gap:.6rem;flex-shrink:0;
+.ca-msgs{
+  min-height:190px;max-height:460px;overflow-y:auto;padding:1.2rem;
+  display:flex;flex-direction:column;gap:.6rem;
 }
-.ca-head img{width:26px;height:26px;object-fit:contain}
-.ca-head b{font-size:.82rem;letter-spacing:.1em;text-transform:uppercase;
-  background:linear-gradient(135deg,var(--white),var(--gold));
-  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.ca-head span{margin-left:auto;color:rgba(255,255,255,.4);cursor:pointer;font-size:1.1rem}
-.ca-msgs{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.6rem}
-.ca-msg{max-width:88%;padding:.6rem .8rem;border-radius:12px;font-size:.86rem;
-  line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+.ca-msg{max-width:85%;padding:.65rem .9rem;border-radius:12px;font-size:.9rem;
+  line-height:1.55;white-space:pre-wrap;word-wrap:break-word}
 .ca-user{align-self:flex-end;background:var(--gold-dim);border:1px solid var(--glass-border);
   border-bottom-right-radius:4px}
 .ca-bot{align-self:flex-start;background:rgba(26,26,46,.8);border:1px solid rgba(255,255,255,.08);
   border-bottom-left-radius:4px}
-.ca-hint{color:rgba(255,255,255,.45);font-size:.8rem;text-align:center;margin:auto 0;
+.ca-hint{color:rgba(255,255,255,.5);font-size:.88rem;text-align:center;margin:auto 0;
   padding:0 1rem;line-height:1.7}
+.ca-chips{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;margin-top:.9rem}
+.ca-chip{
+  padding:.5rem .95rem;border:1px solid var(--glass-border);border-radius:999px;
+  color:var(--gold);font-size:.8rem;cursor:pointer;user-select:none;
+  transition:all .2s;-webkit-tap-highlight-color:transparent;
+}
+.ca-chip:hover{background:var(--gold-dim);border-color:var(--gold)}
 .ca-typing{align-self:flex-start;color:var(--gold);font-size:1.1rem;letter-spacing:.2em;
   animation:caPulse 1.2s ease-in-out infinite}
 @keyframes caPulse{0%,100%{opacity:.35}50%{opacity:1}}
 .ca-input{
-  display:flex;gap:.5rem;padding:.75rem;border-top:1px solid var(--glass-border);flex-shrink:0;
+  display:flex;gap:.5rem;padding:.8rem;border-top:1px solid var(--glass-border);
 }
 .ca-input input{
-  flex:1;padding:.6rem .8rem;background:rgba(26,26,46,.8);
+  flex:1;padding:.7rem .9rem;background:rgba(15,15,30,.75);
   border:1px solid var(--glass-border);border-radius:9px;color:var(--white);
-  font-size:.9rem;font-family:inherit;outline:none;
+  font-size:.95rem;font-family:inherit;outline:none;
 }
 .ca-input input:focus{border-color:var(--gold)}
 .ca-input button{
-  padding:.6rem 1rem;border:none;border-radius:9px;cursor:pointer;
+  padding:.7rem 1.3rem;border:none;border-radius:9px;cursor:pointer;
   background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy);
-  font-weight:700;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;
+  font-weight:700;font-size:.82rem;letter-spacing:.06em;text-transform:uppercase;
 }
 .ca-input button:disabled{opacity:.5;cursor:wait}
-@media(max-width:600px){.ca-panel{right:.6rem;bottom:5.4rem}.ca-fab{right:1rem;bottom:1rem}}
 </style>
-
-<button class="ca-fab" id="caFab" aria-label="Coach Assistant">&#9998;</button>
-<div class="ca-panel" id="caPanel" role="dialog" aria-label="Coach Assistant">
-  <div class="ca-head">
-    <img src="/shield.png" alt=""/>
-    <b>Coach Assistant</b>
-    <span id="caClose" aria-label="close">&times;</span>
-  </div>
-  <div class="ca-msgs" id="caMsgs">
-    <div class="ca-hint">Ask about the data behind these tools —<br/>
-    “Who led the team in AVG in 2026?”<br/>
-    “What was Jack Ujvagi’s whiff rate on his slider?”<br/>
-    “How do our bullpens look so far this off-season?”</div>
-  </div>
-  <div class="ca-input">
-    <input type="text" id="caText" placeholder="Ask about Moeller data…" maxlength="500"/>
-    <button id="caSend">Ask</button>
-  </div>
-</div>
 
 <script>
 (function(){
-  const fab=document.getElementById('caFab'), panel=document.getElementById('caPanel'),
-        msgs=document.getElementById('caMsgs'), input=document.getElementById('caText'),
+  const msgs=document.getElementById('caMsgs'), input=document.getElementById('caText'),
         send=document.getElementById('caSend');
   const hist=[];
   let busy=false;
 
-  fab.addEventListener('click',()=>{panel.classList.toggle('open');if(panel.classList.contains('open'))input.focus();});
-  document.getElementById('caClose').addEventListener('click',()=>panel.classList.remove('open'));
+  // tapping an example question asks it
+  msgs.addEventListener('click',e=>{
+    const chip=e.target.closest('.ca-chip');
+    if(chip){input.value=chip.textContent;ask();}
+  });
 
   function bubble(cls,text){
     const hint=msgs.querySelector('.ca-hint'); if(hint)hint.remove();
