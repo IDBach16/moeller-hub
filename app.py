@@ -164,6 +164,27 @@ def manifest():
     return send_from_directory(APP_DIR, "manifest.json")
 
 # ---------------------------------------------------------------------------
+# Coach Assistant (Claude with tool use over the Moeller data sources)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agent", methods=["POST"])
+def api_agent():
+    from agent import answer, RateLimited
+    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or request.remote_addr or "?")
+    data = request.get_json(silent=True) or {}
+    history = data.get("messages") or []
+    if not isinstance(history, list) or len(history) > 40:
+        return jsonify({"error": "bad request"}), 400
+    try:
+        return jsonify({"reply": answer(history, ip)})
+    except RateLimited as e:
+        return jsonify({"error": str(e)}), 429
+    except Exception as e:
+        return jsonify({"error": f"The assistant hit a snag: {e}"}), 500
+
+
+# ---------------------------------------------------------------------------
 # Git push endpoint
 # ---------------------------------------------------------------------------
 
@@ -600,6 +621,129 @@ body{
 <footer class="footer">
   Moeller Baseball Analytics <span>|</span> @MoeAnalytics
 </footer>
+
+<!-- ====== COACH ASSISTANT ====== -->
+<style>
+.ca-fab{
+  position:fixed;right:1.4rem;bottom:1.4rem;z-index:120;
+  width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;
+  background:linear-gradient(135deg,var(--gold),var(--gold-light));
+  color:var(--navy);font-size:1.6rem;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 8px 30px rgba(197,165,90,.45);transition:transform .2s;
+}
+.ca-fab:hover{transform:scale(1.08)}
+.ca-panel{
+  position:fixed;right:1.4rem;bottom:5.6rem;z-index:120;
+  width:min(400px,calc(100vw - 2rem));height:min(560px,calc(100vh - 8rem));
+  display:none;flex-direction:column;
+  background:rgba(15,15,30,.92);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border:1px solid var(--glass-border);border-radius:16px;overflow:hidden;
+  box-shadow:0 24px 70px rgba(0,0,0,.6);
+}
+.ca-panel.open{display:flex}
+.ca-head{
+  padding:.85rem 1.1rem;border-bottom:1px solid var(--glass-border);
+  display:flex;align-items:center;gap:.6rem;flex-shrink:0;
+}
+.ca-head img{width:26px;height:26px;object-fit:contain}
+.ca-head b{font-size:.82rem;letter-spacing:.1em;text-transform:uppercase;
+  background:linear-gradient(135deg,var(--white),var(--gold));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.ca-head span{margin-left:auto;color:rgba(255,255,255,.4);cursor:pointer;font-size:1.1rem}
+.ca-msgs{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.6rem}
+.ca-msg{max-width:88%;padding:.6rem .8rem;border-radius:12px;font-size:.86rem;
+  line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+.ca-user{align-self:flex-end;background:var(--gold-dim);border:1px solid var(--glass-border);
+  border-bottom-right-radius:4px}
+.ca-bot{align-self:flex-start;background:rgba(26,26,46,.8);border:1px solid rgba(255,255,255,.08);
+  border-bottom-left-radius:4px}
+.ca-hint{color:rgba(255,255,255,.45);font-size:.8rem;text-align:center;margin:auto 0;
+  padding:0 1rem;line-height:1.7}
+.ca-typing{align-self:flex-start;color:var(--gold);font-size:1.1rem;letter-spacing:.2em;
+  animation:caPulse 1.2s ease-in-out infinite}
+@keyframes caPulse{0%,100%{opacity:.35}50%{opacity:1}}
+.ca-input{
+  display:flex;gap:.5rem;padding:.75rem;border-top:1px solid var(--glass-border);flex-shrink:0;
+}
+.ca-input input{
+  flex:1;padding:.6rem .8rem;background:rgba(26,26,46,.8);
+  border:1px solid var(--glass-border);border-radius:9px;color:var(--white);
+  font-size:.9rem;font-family:inherit;outline:none;
+}
+.ca-input input:focus{border-color:var(--gold)}
+.ca-input button{
+  padding:.6rem 1rem;border:none;border-radius:9px;cursor:pointer;
+  background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy);
+  font-weight:700;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;
+}
+.ca-input button:disabled{opacity:.5;cursor:wait}
+@media(max-width:600px){.ca-panel{right:.6rem;bottom:5.4rem}.ca-fab{right:1rem;bottom:1rem}}
+</style>
+
+<button class="ca-fab" id="caFab" aria-label="Coach Assistant">&#9998;</button>
+<div class="ca-panel" id="caPanel" role="dialog" aria-label="Coach Assistant">
+  <div class="ca-head">
+    <img src="/shield.png" alt=""/>
+    <b>Coach Assistant</b>
+    <span id="caClose" aria-label="close">&times;</span>
+  </div>
+  <div class="ca-msgs" id="caMsgs">
+    <div class="ca-hint">Ask about the data behind these tools —<br/>
+    “Who led the team in AVG in 2026?”<br/>
+    “What was Jack Ujvagi’s whiff rate on his slider?”<br/>
+    “How do our bullpens look so far this off-season?”</div>
+  </div>
+  <div class="ca-input">
+    <input type="text" id="caText" placeholder="Ask about Moeller data…" maxlength="500"/>
+    <button id="caSend">Ask</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const fab=document.getElementById('caFab'), panel=document.getElementById('caPanel'),
+        msgs=document.getElementById('caMsgs'), input=document.getElementById('caText'),
+        send=document.getElementById('caSend');
+  const hist=[];
+  let busy=false;
+
+  fab.addEventListener('click',()=>{panel.classList.toggle('open');if(panel.classList.contains('open'))input.focus();});
+  document.getElementById('caClose').addEventListener('click',()=>panel.classList.remove('open'));
+
+  function bubble(cls,text){
+    const hint=msgs.querySelector('.ca-hint'); if(hint)hint.remove();
+    const el=document.createElement('div'); el.className='ca-msg '+cls; el.textContent=text;
+    msgs.appendChild(el); msgs.scrollTop=msgs.scrollHeight; return el;
+  }
+
+  async function ask(){
+    const q=input.value.trim();
+    if(!q||busy)return;
+    busy=true; send.disabled=true; input.value='';
+    bubble('ca-user',q); hist.push({role:'user',text:q});
+    const typing=document.createElement('div');
+    typing.className='ca-typing'; typing.textContent='•••';
+    msgs.appendChild(typing); msgs.scrollTop=msgs.scrollHeight;
+    try{
+      const r=await fetch('/api/agent',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({messages:hist})});
+      const d=await r.json().catch(()=>({}));
+      typing.remove();
+      const reply=(r.ok&&d.reply)?d.reply:(d.error||'Something went wrong — try again.');
+      bubble('ca-bot',reply);
+      if(r.ok&&d.reply)hist.push({role:'assistant',text:d.reply});
+    }catch(e){
+      typing.remove();
+      bubble('ca-bot','Could not reach the assistant — check your connection and try again.');
+    }finally{
+      busy=false; send.disabled=false; input.focus();
+    }
+  }
+  send.addEventListener('click',ask);
+  input.addEventListener('keydown',e=>{if(e.key==='Enter')ask();});
+})();
+</script>
 
 <!-- ====== SCROLL ANIMATIONS ====== -->
 <script>
