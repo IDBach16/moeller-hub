@@ -24,6 +24,7 @@ import requests as rq
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(APP_DIR, "season_pitches.csv")
+HITTRAX_PATH = os.path.join(APP_DIR, "hittrax.csv")
 
 CHARTING_BASE = "https://moeller-charting-production.up.railway.app"
 STATS_BASE = "https://moeller-2026-stats-production.up.railway.app"
@@ -213,6 +214,95 @@ def tool_season_batting(batter, year=None):
     return out
 
 
+# --- HitTrax cage data (skeleton; finalized against a real export) --------
+# HitTrax export column names vary; resolve them by trying candidates rather
+# than hard-coding. When the first real export lands, confirm/adjust the lists
+# below and add per-session trends -- everything else already works.
+
+_HT_CANDIDATES = {
+    "batter":     ["batter", "user", "player", "name", "hitter"],
+    "date":       ["date", "session date", "timestamp", "created", "datetime"],
+    "exit_velo":  ["exit velocity", "exitvelo", "exit velo", "ev", "velo mph"],
+    "launch":     ["launch angle", "launchangle", "la", "elevation", "angle"],
+    "distance":   ["distance", "dist", "carry", "distance ft"],
+    "result":     ["result", "hit type", "type", "outcome", "play result"],
+    "pitch_velo": ["pitch velocity", "pitch velo", "pitch speed", "pitch mph"],
+}
+
+_ht = None  # cache: None=untried, False=no file, else (df, resolved_cols)
+
+
+def _hittrax():
+    global _ht
+    if _ht is None:
+        if not os.path.exists(HITTRAX_PATH):
+            _ht = False
+        else:
+            import pandas as pd
+            df = None
+            for enc in ("utf-8-sig", "utf-8", "cp1252"):
+                try:
+                    df = pd.read_csv(HITTRAX_PATH, encoding=enc, low_memory=False)
+                    break
+                except Exception:
+                    continue
+            if df is None:
+                _ht = False
+            else:
+                df.columns = [str(c).strip() for c in df.columns]
+                norm = {c: c.lower().replace("_", " ").strip() for c in df.columns}
+                resolved = {}
+                for key, cands in _HT_CANDIDATES.items():
+                    col = next((o for o, n in norm.items() if n in cands), None)
+                    if col is None:
+                        col = next((o for o, n in norm.items()
+                                    if any(c in n for c in cands)), None)
+                    if col:
+                        resolved[key] = col
+                _ht = (df, resolved)
+    return _ht if _ht else None
+
+
+def tool_hittrax(batter=None):
+    ht = _hittrax()
+    if ht is None:
+        return {"status": "no HitTrax data loaded yet",
+                "note": "HitTrax cage data is published to the hub weekly once a coach "
+                        "exports it; none has been loaded on the server yet."}
+    df, cols = ht
+    if "batter" not in cols:
+        return {"status": "loaded but not yet mapped",
+                "columns": list(df.columns),
+                "note": "The batter/player column couldn't be identified automatically; "
+                        "this export needs its column mapping finalized."}
+    import pandas as pd
+    d = df
+    if batter:
+        names = _match_players(d[cols["batter"]], batter)
+        if not names:
+            return {"error": f"no HitTrax player matching '{batter}'",
+                    "available": sorted(d[cols["batter"]].dropna().astype(str).unique())[:60]}
+        d = d[d[cols["batter"]].astype(str).isin(names)]
+
+    def num(key):
+        return pd.to_numeric(d[cols[key]], errors="coerce") if key in cols else None
+
+    out = {"player": batter or "all hitters", "swings": len(d)}
+    ev, la, dist = num("exit_velo"), num("launch"), num("distance")
+    if ev is not None and ev.notna().any():
+        out["avg_exit_velo"] = round(float(ev.mean()), 1)
+        out["max_exit_velo"] = round(float(ev.max()), 1)
+        out["hard_hit_pct_90plus"] = _pct(int((ev >= 90).sum()), int(ev.notna().sum()))
+    if la is not None and la.notna().any():
+        out["avg_launch_angle"] = round(float(la.mean()), 1)
+    if dist is not None and dist.notna().any():
+        out["avg_distance"] = round(float(dist.mean()), 1)
+        out["max_distance"] = round(float(dist.max()), 1)
+    if "date" in cols:
+        out["sessions"] = int(d[cols["date"]].astype(str).str[:10].nunique())
+    return out
+
+
 def tool_team_stats(kind):
     paths = {"batting": "/api/gcl/batting", "pitching": "/api/gcl/pitching",
              "games": "/api/gcl/games", "record": "/api/config"}
@@ -233,6 +323,7 @@ TOOL_IMPLS = {
     "charting_report": tool_charting_report,
     "season_pitching": tool_season_pitching,
     "season_batting": tool_season_batting,
+    "hittrax": tool_hittrax,
     "team_stats": tool_team_stats,
 }
 
@@ -297,6 +388,21 @@ TOOLS = [
         },
     },
     {
+        "name": "hittrax",
+        "description": ("HitTrax cage/batted-ball data for Moeller hitters: exit velocity "
+                        "(avg/max), hard-hit rate, launch angle, distance, and session counts. "
+                        "Call this for questions about a hitter's exit velo, how hard he's "
+                        "hitting the ball, or his cage/HitTrax numbers. Partial names are matched. "
+                        "This data is refreshed weekly and may not be loaded yet — if the tool "
+                        "reports no data, tell the coach HitTrax data hasn't been uploaded yet."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "batter": {"type": "string", "description": "Filter to one hitter by (partial) name; omit for all"},
+            },
+        },
+    },
+    {
         "name": "team_stats",
         "description": ("Official 2026 team statistics from the Team Stats app. Call this for the team's "
                         "record, box-score batting stats (AVG/OBP/HR/RBI...), pitching stats (ERA/IP/K...), "
@@ -318,6 +424,8 @@ You have tools over three real data sources:
 - The Charting App: off-season bullpens and live at-bats being charted right now (live database).
 - Season pitch data: 19,560 tracked pitches from the 2024, 2025 and 2026 seasons (AWRE/GoRout).
 - Team Stats: the official 2026 season record, box-score batting/pitching stats, and game log.
+- HitTrax: cage batted-ball data (exit velo, launch angle, distance) — refreshed weekly. This \
+may not be loaded yet; if the tool says so, tell the coach HitTrax data hasn't been uploaded yet.
 
 Ground rules:
 - Answer from tool results, never from memory. If a tool returns an error or empty data, say what's \
