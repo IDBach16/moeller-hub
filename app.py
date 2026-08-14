@@ -291,15 +291,6 @@ body{
   100%{background-position:200% center}
 }
 
-.hero-subtitle{
-  font-size:clamp(1rem,2.5vw,1.4rem);
-  font-weight:300;
-  letter-spacing:.35em;
-  text-transform:uppercase;
-  color:var(--gold);
-  opacity:.85;
-}
-
 /* Divider */
 .hero-divider{
   width:80px;height:2px;
@@ -307,9 +298,11 @@ body{
   margin:1.2rem auto;
 }
 
-/* Scroll indicator */
+/* Scroll indicator -- centred with left/right:0 rather than a translateX,
+   because the fadeInUp animation's final transform would overwrite it and
+   push the hint off-centre. */
 .scroll-hint{
-  position:absolute;bottom:2rem;left:50%;transform:translateX(-50%);
+  position:absolute;bottom:2rem;left:0;right:0;
   z-index:2;
   display:flex;flex-direction:column;align-items:center;gap:.4rem;
   opacity:.5;animation:fadeInUp 1s .8s both;
@@ -489,7 +482,6 @@ body{
     <img src="/shield.png" alt="Moeller Shield" class="shield-logo"/>
     <div class="hero-divider"></div>
     <h1 class="hero-title">Moeller Baseball Analytics</h1>
-    <p class="hero-subtitle">2026 Season</p>
   </div>
   <div class="scroll-hint">
     <span>Explore Tools</span>
