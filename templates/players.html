@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Players — Moeller Baseball Analytics{% endblock %}
+
+{% block head %}
+<style>
+.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem}
+.pcard{
+  display:block;text-decoration:none;color:var(--white);
+  background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;
+  padding:1.1rem 1.2rem;transition:all .25s ease;
+}
+.pcard:hover{border-color:rgba(197,165,90,.45);transform:translateY(-3px);
+  box-shadow:0 14px 34px rgba(0,0,0,.35)}
+.pcard .nm{font-size:1.02rem;font-weight:700;margin-bottom:.25rem}
+.pcard .sub{font-size:.76rem;color:rgba(255,255,255,.45);letter-spacing:.04em}
+.pcard .row{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
+.filters{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:1.5rem}
+.filters input[type=search]{max-width:280px}
+.seg{display:flex;border:1px solid var(--glass-border);border-radius:8px;overflow:hidden}
+.seg button{
+  padding:.55rem 1rem;background:transparent;border:none;cursor:pointer;
+  color:rgba(255,255,255,.55);font-size:.78rem;font-weight:600;font-family:inherit;
+  letter-spacing:.05em;transition:all .2s;
+}
+.seg button.on{background:var(--gold-dim);color:var(--gold)}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+  <div class="page-head"><h1>Players</h1></div>
+  <p class="page-sub">
+    One profile per player: training history, game performance, development goals and
+    what has changed against his own baseline.
+  </p>
+
+  <div class="filters">
+    <input type="search" id="filter" placeholder="Filter by name&hellip;"/>
+    <div class="seg">
+      <button data-side="" class="on">All</button>
+      <button data-side="pitching">Pitchers</button>
+      <button data-side="hitting">Position</button>
+    </div>
+    <span class="muted" id="count">{{ roster|length }} players</span>
+  </div>
+
+  {% if roster %}
+  <div class="roster" id="roster">
+    {% for p in roster %}
+    <a class="pcard" href="/players/{{ p.slug }}"
+       data-name="{{ p.name|lower }}" data-side="{{ 'pitching' if p.is_pitcher else 'hitting' }}">
+      <div class="nm">{{ p.name }}</div>
+      <div class="sub">
+        {{ 'Pitcher' if p.is_pitcher else 'Position player' }}{% if p.class_year %} &middot; {{ p.class_year }}{% endif %}
+        {%- if p.bats %} &middot; B:{{ p.bats }}{% endif %}{% if p.throws %} T:{{ p.throws }}{% endif %}
+      </div>
+      <div class="row">
+        {% if p.sessions %}<span class="pill flat">{{ p.sessions }} session{{ '' if p.sessions == 1 else 's' }}</span>
+        {% else %}<span class="pill flat">no training data</span>{% endif %}
+        {% if p.changes %}<span class="pill pending">{{ p.changes }} change{{ '' if p.changes == 1 else 's' }}</span>{% endif %}
+        {% if p.open_goals %}<span class="pill ok">{{ p.open_goals }} goal{{ '' if p.open_goals == 1 else 's' }}</span>{% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="panel">
+    <p class="empty">
+      No players yet. Run <span class="mono">python seed.py</span> to build the roster from
+      the season pitch data.
+    </p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const cards = [...document.querySelectorAll('.pcard')];
+  const filter = document.getElementById('filter');
+  const count = document.getElementById('count');
+  let side = '';
+
+  function apply(){
+    const q = filter.value.trim().toLowerCase();
+    let n = 0;
+    for(const c of cards){
+      const ok = (!q || c.dataset.name.includes(q)) && (!side || c.dataset.side === side);
+      c.style.display = ok ? '' : 'none';
+      if(ok) n++;
+    }
+    count.textContent = n + (n === 1 ? ' player' : ' players');
+  }
+  filter.addEventListener('input', apply);
+  document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.seg button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); side = b.dataset.side; apply();
+  }));
+})();
+</script>
+{% endblock %}

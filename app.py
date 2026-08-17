@@ -1,767 +1,568 @@
 """
-Moeller Baseball Analytics Hub
-Central landing page for all Moeller Baseball analytics tools.
+Moeller Baseball Analytics Hub.
+
+Central landing page for the Moeller analytics tools, and -- from here on -- the
+front end of the player-development system described in PLAYER_DEV_SPEC.md.
+
+Structure (spec section 1.1):
+    app.py       this file: the Flask app factory, auth gate, routes
+    db.py        schema + engine for the player-development database
+    metrics.py   the metric registry (polarity, thresholds, pitch types)
+    seed.py      first-run roster / vendor-id seeding
+    tools.py     the existing analytics tools, as data
+    agent.py     the Coach Assistant
+    templates/   base.html, home.html, login.html
+    static/      images and the PWA manifest
+
+Asset URLs are deliberately unchanged (/shield.png, not /static/shield.png):
+the PWA manifest and cached clients reference the old paths.
 """
 
 import os
 import subprocess
 from datetime import timedelta
-from flask import (Flask, render_template_string, send_from_directory,
-                   jsonify, request, session, redirect, url_for)
 
-app = Flask(__name__)
+from flask import (Flask, jsonify, redirect, render_template, request,
+                   send_from_directory, session, url_for)
+
+import db
+import metrics
+import tools
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ---------------------------------------------------------------------------
-# Password gate
-# ---------------------------------------------------------------------------
-
-app.secret_key = os.environ.get("SECRET_KEY", "moeller-hub-2027-secret")
-app.permanent_session_lifetime = timedelta(days=30)
+STATIC_DIR = os.path.join(APP_DIR, "static")
 
 # Empty = no gate. To require a password again, set HUB_PASSWORD on Railway.
+#
+# NOTE (spec section 11): the gate has been off since 2026-08-14. That is fine
+# for a page of links. It is NOT fine once this app holds player-development
+# records and coach notes -- turn it back on before any write endpoint ships.
 HUB_PASSWORD = os.environ.get("HUB_PASSWORD", "")
 
-# routes that never require login (assets used by the login page itself)
+# Routes that never require login (assets the login page itself needs).
 PUBLIC_PATHS = {"/login", "/bg-field.jpg", "/shield.png", "/moeller-logo.png",
                 "/favicon.ico", "/manifest.json"}
 
-@app.before_request
-def require_login():
-    if not HUB_PASSWORD:
-        return None
-    if request.path in PUBLIC_PATHS:
-        return None
-    if not session.get("authed"):
-        return redirect(url_for("login"))
-    return None
+# Served at the repo root historically; they live in static/ now.
+ROOT_ASSETS = {"bg-field.jpg", "shield.png", "moeller-logo.png",
+               "field2.jpg", "manifest.json"}
 
-LOGIN_HTML = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Moeller Baseball Analytics — Login</title>
-<link rel="icon" href="/moeller-logo.png"/>
-<style>
-*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --navy:#1a1a2e; --navy-deep:#0f0f1e;
-  --gold:#C5A55A; --gold-light:#d4ba78;
-  --white:#ffffff;
-  --glass:rgba(26,26,46,.65); --glass-border:rgba(197,165,90,.25);
-}
-body{
-  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
-  min-height:100vh;display:flex;align-items:center;justify-content:center;
-  background:var(--navy-deep);color:var(--white);
-}
-body::before{
-  content:'';position:fixed;inset:0;
-  background:url('/bg-field.jpg') center/cover no-repeat;
-  filter:brightness(.3) saturate(.8);z-index:0;
-}
-.login-card{
-  position:relative;z-index:1;
-  width:min(400px,90vw);
-  background:var(--glass);
-  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
-  border:1px solid var(--glass-border);
-  border-radius:16px;
-  padding:2.5rem 2rem;
-  text-align:center;
-  box-shadow:0 20px 60px rgba(0,0,0,.5);
-}
-.login-card img{
-  width:90px;height:90px;object-fit:contain;margin-bottom:1rem;
-  filter:drop-shadow(0 0 25px rgba(197,165,90,.4));
-}
-.login-title{
-  font-size:1.1rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase;
-  background:linear-gradient(135deg,var(--white),var(--gold),var(--white));
-  background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;
-  margin-bottom:.4rem;
-}
-.login-sub{
-  font-size:.7rem;letter-spacing:.3em;text-transform:uppercase;
-  color:var(--gold);opacity:.85;margin-bottom:1.8rem;
-}
-input[type=password]{
-  width:100%;padding:.85rem 1rem;
-  background:rgba(15,15,30,.7);
-  border:1px solid var(--glass-border);
-  border-radius:8px;color:var(--white);
-  font-size:1rem;letter-spacing:.05em;
-  outline:none;margin-bottom:1rem;
-  transition:border-color .3s ease;
-}
-input[type=password]:focus{border-color:var(--gold)}
-button{
-  width:100%;padding:.85rem 1rem;
-  background:transparent;border:1.5px solid var(--gold);border-radius:8px;
-  color:var(--gold);font-size:.85rem;font-weight:600;
-  letter-spacing:.1em;text-transform:uppercase;cursor:pointer;
-  transition:all .3s ease;
-}
-button:hover{background:var(--gold);color:var(--navy)}
-.err{
-  color:#e37f7f;font-size:.8rem;margin-bottom:1rem;letter-spacing:.03em;
-}
-</style>
-</head>
-<body>
-<form class="login-card" method="POST" action="/login">
-  <img src="/shield.png" alt="Moeller Shield"/>
-  <div class="login-title">Moeller Baseball Analytics</div>
-  <div class="login-sub">Coaches Access</div>
-  {% if error %}<div class="err">{{ error }}</div>{% endif %}
-  <input type="password" name="password" placeholder="Password" autofocus required/>
-  <button type="submit">Enter</button>
-</form>
-</body>
-</html>"""
+WRITES_OFF = ("Uploads are disabled because the hub is public. Set HUB_PASSWORD "
+              "on the Railway service to turn the coaches' login back on.")
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if not HUB_PASSWORD:
-        return redirect(url_for("index"))
-    error = None
-    if request.method == "POST":
-        if request.form.get("password") == HUB_PASSWORD:
-            session.permanent = True
-            session["authed"] = True
+
+def writes_enabled():
+    """Spec section 11: endpoints that write player-development records must not
+    be reachable on an open URL. The password gate is what makes them private.
+
+    Local development is exempt -- there is no public URL to protect, and Ian
+    needs to be able to map his first HitTrax export before deciding anything
+    about the gate. RAILWAY_ENVIRONMENT is only set on Railway.
+    """
+    if HUB_PASSWORD:
+        return True
+    return not os.environ.get("RAILWAY_ENVIRONMENT")
+
+
+def _engine():
+    return db.get_engine()
+
+
+def _metric_options():
+    """Dropdown contents for the column-mapping UI: the structural roles first,
+    then every registered metric grouped by side."""
+    roles = [{"key": r, "label": r.replace("_", " ").title(), "group": "Column role"}
+             for r in db.COLUMN_ROLES]
+    mets = [{"key": m.key, "label": f"{m.label} ({m.unit})",
+             "group": m.side.title()}
+            for m in sorted(metrics.REGISTRY.values(),
+                            key=lambda m: (m.side, m.label))]
+    return roles + mets
+
+
+def create_app():
+    app = Flask(__name__, static_folder=STATIC_DIR, template_folder="templates")
+    app.secret_key = os.environ.get("SECRET_KEY", "moeller-hub-2027-secret")
+    app.permanent_session_lifetime = timedelta(days=30)
+
+    # -----------------------------------------------------------------------
+    # Password gate
+    # -----------------------------------------------------------------------
+
+    @app.before_request
+    def require_login():
+        if not HUB_PASSWORD:
+            return None
+        if request.path in PUBLIC_PATHS:
+            return None
+        if not session.get("authed"):
+            return redirect(url_for("login"))
+        return None
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        if not HUB_PASSWORD:
             return redirect(url_for("index"))
-        error = "Incorrect password"
-    return render_template_string(LOGIN_HTML, error=error)
+        error = None
+        if request.method == "POST":
+            if request.form.get("password") == HUB_PASSWORD:
+                session.permanent = True
+                session["authed"] = True
+                return redirect(url_for("index"))
+            error = "Incorrect password"
+        return render_template("login.html", error=error)
 
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
+    @app.route("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
 
-# ---------------------------------------------------------------------------
-# Static file routes
-# ---------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Static assets, at their original root URLs
+    # -----------------------------------------------------------------------
 
-@app.route("/bg-field.jpg")
-def bg_field():
-    return send_from_directory(APP_DIR, "bg-field.jpg")
+    # One explicit rule per asset rather than a /<catch-all>, which would
+    # shadow the page routes Phase C adds (/players, /team, /tools...).
+    def _make_asset_route(filename):
+        def _serve():
+            return send_from_directory(STATIC_DIR, filename)
+        _serve.__name__ = "asset_" + filename.replace(".", "_").replace("-", "_")
+        return _serve
 
-@app.route("/shield.png")
-def shield():
-    return send_from_directory(APP_DIR, "shield.png")
+    for _asset in ROOT_ASSETS:
+        app.add_url_rule("/" + _asset, view_func=_make_asset_route(_asset))
 
-@app.route("/moeller-logo.png")
-def logo():
-    return send_from_directory(APP_DIR, "moeller-logo.png")
+    @app.route("/favicon.ico")
+    def favicon():
+        return send_from_directory(STATIC_DIR, "moeller-logo.png")
 
-@app.route("/favicon.ico")
-def favicon():
-    return send_from_directory(APP_DIR, "moeller-logo.png")
+    # -----------------------------------------------------------------------
+    # Coach Assistant
+    # -----------------------------------------------------------------------
 
-@app.route("/manifest.json")
-def manifest():
-    return send_from_directory(APP_DIR, "manifest.json")
+    @app.route("/api/agent", methods=["POST"])
+    def api_agent():
+        from agent import RateLimited, answer
+        ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+              or request.remote_addr or "?")
+        data = request.get_json(silent=True) or {}
+        history = data.get("messages") or []
+        if not isinstance(history, list) or len(history) > 40:
+            return jsonify({"error": "bad request"}), 400
+        try:
+            return jsonify({"reply": answer(history, ip)})
+        except RateLimited as e:
+            return jsonify({"error": str(e)}), 429
+        except Exception as e:
+            return jsonify({"error": f"The assistant hit a snag: {e}"}), 500
 
-# ---------------------------------------------------------------------------
-# Coach Assistant (Claude with tool use over the Moeller data sources)
-# ---------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Git push endpoint
+    # -----------------------------------------------------------------------
 
-@app.route("/api/agent", methods=["POST"])
-def api_agent():
-    from agent import answer, RateLimited
-    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-          or request.remote_addr or "?")
-    data = request.get_json(silent=True) or {}
-    history = data.get("messages") or []
-    if not isinstance(history, list) or len(history) > 40:
-        return jsonify({"error": "bad request"}), 400
-    try:
-        return jsonify({"reply": answer(history, ip)})
-    except RateLimited as e:
-        return jsonify({"error": str(e)}), 429
-    except Exception as e:
-        return jsonify({"error": f"The assistant hit a snag: {e}"}), 500
+    @app.route("/api/git-push", methods=["POST"])
+    def git_push():
+        # The password gate is what kept this endpoint private. With the gate
+        # off, it must not be reachable at all.
+        if not HUB_PASSWORD:
+            return jsonify({"ok": False,
+                            "error": "disabled while the password gate is off"}), 403
+        try:
+            subprocess.run(["git", "add", "-A"], cwd=APP_DIR,
+                           capture_output=True, text=True)
+            msg = request.json.get("message", "auto-push") if request.is_json else "auto-push"
+            subprocess.run(["git", "commit", "-m", msg], cwd=APP_DIR,
+                           capture_output=True, text=True)
+            result = subprocess.run(["git", "push"], cwd=APP_DIR,
+                                    capture_output=True, text=True)
+            return jsonify({"ok": True, "output": result.stdout or result.stderr})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
 
+    # -----------------------------------------------------------------------
+    # Data Collection -- upload, column mapping, name review (spec section 8.4)
+    # -----------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Git push endpoint
-# ---------------------------------------------------------------------------
-
-@app.route("/api/git-push", methods=["POST"])
-def git_push():
-    # The password gate is what kept this endpoint private. With the gate off,
-    # it must not be reachable at all.
-    if not HUB_PASSWORD:
-        return jsonify({"ok": False, "error": "disabled while the password gate is off"}), 403
-    try:
-        result = subprocess.run(
-            ["git", "add", "-A"],
-            cwd=APP_DIR, capture_output=True, text=True,
+    @app.route("/collect")
+    def collect():
+        import ingest
+        engine = _engine()
+        return render_template(
+            "collect.html",
+            imports=ingest.recent_imports(engine),
+            reviews=ingest.open_reviews(engine),
+            vendors=[v for v in db.SOURCES if v not in ("awre", "manual")],
+            session_types=db.SESSION_TYPES,
+            purposes=db.SESSION_PURPOSES,
+            metric_options=_metric_options(),
+            writes_enabled=writes_enabled(),
         )
-        msg = request.json.get("message", "auto-push") if request.is_json else "auto-push"
-        result = subprocess.run(
-            ["git", "commit", "-m", msg],
-            cwd=APP_DIR, capture_output=True, text=True,
-        )
-        result = subprocess.run(
-            ["git", "push"],
-            cwd=APP_DIR, capture_output=True, text=True,
-        )
-        return jsonify({"ok": True, "output": result.stdout or result.stderr})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
 
-# ---------------------------------------------------------------------------
-# Main page
-# ---------------------------------------------------------------------------
+    @app.route("/api/import", methods=["POST"])
+    def api_import():
+        import ingest
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return jsonify({"error": "no file"}), 400
+        raw = f.read()
+        if len(raw) > 60 * 1024 * 1024:
+            return jsonify({"error": "that file is larger than 60 MB"}), 413
+        try:
+            import_id, sniffed = ingest.store(
+                _engine(), request.form.get("vendor", ""), f.filename, raw,
+                uploaded_by=request.form.get("uploaded_by") or None,
+                side=request.form.get("side") or None,
+                session_type=request.form.get("session_type") or None,
+                purpose=request.form.get("purpose") or None)
+        except ingest.IngestError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify({"import_id": import_id,
+                        "analysis": ingest.analyze(_engine(), import_id)})
 
-HTML = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Moeller Baseball Analytics</title>
-<link rel="icon" href="/moeller-logo.png"/>
-<link rel="apple-touch-icon" href="/moeller-logo.png"/>
-<link rel="manifest" href="/manifest.json"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="Moeller Baseball"/>
-<meta name="theme-color" content="#1a1a2e"/>
-<style>
-/* ===== RESET & BASE ===== */
-*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --navy:#1a1a2e;
-  --navy-deep:#0f0f1e;
-  --gold:#C5A55A;
-  --gold-light:#d4ba78;
-  --gold-dim:rgba(197,165,90,.15);
-  --white:#ffffff;
-  --glass:rgba(26,26,46,.55);
-  --glass-border:rgba(197,165,90,.2);
-}
-html{scroll-behavior:smooth;font-size:16px}
-body{
-  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
-  background:var(--navy-deep);
-  color:var(--white);
-  overflow-x:hidden;
-  -webkit-font-smoothing:antialiased;
-}
+    @app.route("/api/import/<int:import_id>")
+    def api_import_get(import_id):
+        import ingest
+        try:
+            return jsonify(ingest.analyze(_engine(), import_id))
+        except ingest.IngestError as e:
+            return jsonify({"error": str(e)}), 404
 
-/* ===== HERO ===== */
-.hero{
-  position:relative;
-  min-height:70vh;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  text-align:center;
-  overflow:hidden;
-}
-.hero::before{
-  content:'';
-  position:absolute;inset:0;
-  background:url('/bg-field.jpg') center/cover no-repeat fixed;
-  filter:brightness(.35) saturate(.8);
-  z-index:0;
-}
-.hero::after{
-  content:'';
-  position:absolute;inset:0;
-  background:linear-gradient(
-    180deg,
-    rgba(15,15,30,.6) 0%,
-    rgba(15,15,30,.3) 40%,
-    rgba(15,15,30,.85) 100%
-  );
-  z-index:1;
-}
-.hero-content{position:relative;z-index:2;padding:2rem 1rem}
+    @app.route("/api/import/<int:import_id>/map", methods=["POST"])
+    def api_import_map(import_id):
+        import ingest
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        data = request.get_json(silent=True) or {}
+        try:
+            info = ingest.analyze(_engine(), import_id)
+            n = ingest.save_mappings(_engine(), info["vendor"],
+                                     data.get("mappings") or {},
+                                     confirmed_by=data.get("confirmed_by"))
+        except ingest.IngestError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify({"saved": n, "analysis": ingest.analyze(_engine(), import_id)})
 
-/* Shield logo */
-.shield-logo{
-  width:140px;height:140px;
-  object-fit:contain;
-  margin-bottom:1.5rem;
-  filter:drop-shadow(0 0 30px rgba(197,165,90,.4));
-  animation:shieldPulse 4s ease-in-out infinite;
-}
-@keyframes shieldPulse{
-  0%,100%{filter:drop-shadow(0 0 20px rgba(197,165,90,.3))}
-  50%{filter:drop-shadow(0 0 40px rgba(197,165,90,.6))}
-}
+    @app.route("/api/import/<int:import_id>/commit", methods=["POST"])
+    def api_import_commit(import_id):
+        import ingest
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        dry = bool((request.get_json(silent=True) or {}).get("dry_run"))
+        try:
+            stats = ingest.commit(_engine(), import_id, dry_run=dry)
+        except ingest.IngestError as e:
+            return jsonify({"error": str(e)}), 400
+        # New data means the baselines may have moved -- detect straight away so
+        # the coach sees the consequence of the upload, not next time a job runs.
+        if not dry and stats.get("measurements"):
+            import changes
+            try:
+                stats["changes_detected"] = changes.compute_all(
+                    _engine(), write=True)["fired"]
+            except Exception as e:
+                stats["change_detection_error"] = str(e)
+        return jsonify(stats)
 
-.hero-title{
-  font-size:clamp(2rem,5vw,3.5rem);
-  font-weight:900;
-  letter-spacing:.12em;
-  text-transform:uppercase;
-  background:linear-gradient(135deg,var(--white) 0%,var(--gold) 50%,var(--white) 100%);
-  background-size:200% auto;
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-  animation:shimmer 6s linear infinite;
-  margin-bottom:.5rem;
-}
-@keyframes shimmer{
-  0%{background-position:0% center}
-  100%{background-position:200% center}
-}
+    @app.route("/api/import/<int:import_id>/recommit", methods=["POST"])
+    def api_import_recommit(import_id):
+        import ingest
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        try:
+            return jsonify(ingest.recommit(_engine(), import_id))
+        except ingest.IngestError as e:
+            return jsonify({"error": str(e)}), 400
 
-/* Divider */
-.hero-divider{
-  width:80px;height:2px;
-  background:linear-gradient(90deg,transparent,var(--gold),transparent);
-  margin:1.2rem auto;
-}
+    @app.route("/api/reviews")
+    def api_reviews():
+        import ingest
+        return jsonify(ingest.open_reviews(_engine()))
 
-/* Scroll indicator -- centred with left/right:0 rather than a translateX,
-   because the fadeInUp animation's final transform would overwrite it and
-   push the hint off-centre. */
-.scroll-hint{
-  position:absolute;bottom:2rem;left:0;right:0;
-  z-index:2;
-  display:flex;flex-direction:column;align-items:center;gap:.4rem;
-  opacity:.5;animation:fadeInUp 1s .8s both;
-}
-.scroll-hint span{font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;color:var(--gold-light)}
-.scroll-arrow{
-  width:20px;height:20px;
-  border-right:2px solid var(--gold);border-bottom:2px solid var(--gold);
-  transform:rotate(45deg);
-  animation:bounce 2s infinite;
-}
-@keyframes bounce{
-  0%,100%{transform:rotate(45deg) translateY(0)}
-  50%{transform:rotate(45deg) translateY(6px)}
-}
+    @app.route("/api/reviews/<int:review_id>/<action>", methods=["POST"])
+    def api_review_action(review_id, action):
+        import ingest
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        data = request.get_json(silent=True) or {}
+        try:
+            if action == "accept":
+                pid = ingest.accept_review(_engine(), review_id,
+                                           player_id=data.get("player_id"),
+                                           resolved_by=data.get("resolved_by"))
+                return jsonify({"ok": True, "player_id": pid})
+            if action == "reject":
+                ingest.reject_review(_engine(), review_id,
+                                     resolved_by=data.get("resolved_by"))
+                return jsonify({"ok": True})
+        except ingest.IngestError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify({"error": "unknown action"}), 400
 
-/* ===== CARDS SECTION ===== */
-.section{
-  max-width:1200px;
-  margin:0 auto;
-  padding:4rem 1.5rem 5rem;
-}
-.section-label{
-  text-align:center;
-  font-size:.75rem;
-  letter-spacing:.3em;
-  text-transform:uppercase;
-  color:var(--gold);
-  margin-bottom:.5rem;
-}
-.section-title{
-  text-align:center;
-  font-size:clamp(1.5rem,3vw,2.2rem);
-  font-weight:700;
-  margin-bottom:2.5rem;
-  color:var(--white);
-}
+    @app.route("/api/players")
+    def api_players():
+        from sqlalchemy import select
+        engine = _engine()
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(db.players.c.id, db.players.c.slug, db.players.c.first_name,
+                       db.players.c.last_name, db.players.c.is_pitcher,
+                       db.players.c.bats, db.players.c.throws)
+                .where(db.players.c.is_active == True)  # noqa: E712
+                .order_by(db.players.c.last_name, db.players.c.first_name)).all()
+        return jsonify([{"id": r.id, "slug": r.slug,
+                         "name": f"{r.first_name} {r.last_name}",
+                         "is_pitcher": bool(r.is_pitcher),
+                         "bats": r.bats, "throws": r.throws} for r in rows])
 
-.cards-grid{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:1.5rem;
-}
+    # -----------------------------------------------------------------------
+    # Health -- confirms whether the player-development database is reachable.
+    # Useful the moment Postgres is added on Railway (spec section 12, phase A).
+    # -----------------------------------------------------------------------
 
-/* ===== CARD ===== */
-.card{
-  position:relative;
-  background:var(--glass);
-  backdrop-filter:blur(16px);
-  -webkit-backdrop-filter:blur(16px);
-  border:1px solid var(--glass-border);
-  border-radius:16px;
-  padding:2rem 1.5rem 1.8rem;
-  display:flex;flex-direction:column;
-  transition:transform .35s cubic-bezier(.22,1,.36,1),
-             box-shadow .35s ease,
-             border-color .35s ease;
-  overflow:hidden;
-  opacity:0;transform:translateY(30px);
-}
-.card.visible{
-  opacity:1;transform:translateY(0);
-  transition:opacity .6s ease,transform .6s cubic-bezier(.22,1,.36,1);
-}
-.card::before{
-  content:'';
-  position:absolute;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,var(--gold),var(--gold-light),var(--gold));
-  opacity:0;transition:opacity .35s ease;
-}
-.card:hover{
-  transform:translateY(-6px);
-  box-shadow:0 20px 50px rgba(0,0,0,.4),0 0 30px rgba(197,165,90,.08);
-  border-color:rgba(197,165,90,.35);
-}
-.card:hover::before{opacity:1}
+    @app.route("/api/health")
+    def health():
+        out = {"ok": True, "gate": bool(HUB_PASSWORD)}
+        try:
+            import db
+            from sqlalchemy import func, select
+            engine = db.get_engine()
+            with engine.connect() as conn:
+                out["players"] = conn.execute(
+                    select(func.count()).select_from(db.players)).scalar()
+            out["backend"] = "postgres" if db.is_postgres() else "sqlite"
+        except Exception as e:
+            out["ok"] = False
+            out["db_error"] = str(e)
+        return jsonify(out)
 
-.card-icon{
-  width:52px;height:52px;
-  border-radius:12px;
-  display:flex;align-items:center;justify-content:center;
-  background:var(--gold-dim);
-  margin-bottom:1.2rem;
-  flex-shrink:0;
-}
-.card-icon svg{width:26px;height:26px;stroke:var(--gold);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+    # -----------------------------------------------------------------------
+    # Pages
+    # -----------------------------------------------------------------------
 
-.card-title{
-  font-size:1.15rem;
-  font-weight:700;
-  margin-bottom:.5rem;
-  color:var(--white);
-}
-.card-desc{
-  font-size:.88rem;
-  line-height:1.6;
-  color:rgba(255,255,255,.6);
-  flex:1;
-  margin-bottom:1.4rem;
-}
+    @app.route("/")
+    def index():
+        import development
+        import profiles
+        return render_template("home.html", nav="home", chips=tools.CHIPS,
+                               overview=profiles.team_overview(_engine()),
+                               due=development.due_for_review(_engine()))
 
-.card-btn{
-  display:inline-flex;align-items:center;gap:.5rem;
-  padding:.65rem 1.4rem;
-  background:transparent;
-  border:1.5px solid var(--gold);
-  border-radius:8px;
-  color:var(--gold);
-  font-size:.82rem;
-  font-weight:600;
-  letter-spacing:.08em;
-  text-transform:uppercase;
-  text-decoration:none;
-  cursor:pointer;
-  transition:all .3s ease;
-  align-self:flex-start;
-}
-.card-btn:hover{
-  background:var(--gold);
-  color:var(--navy);
-  box-shadow:0 4px 20px rgba(197,165,90,.3);
-}
-.card-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+    @app.route("/players")
+    def players_page():
+        import profiles
+        return render_template("players.html", nav="players",
+                               roster=profiles.roster(_engine()))
 
-/* Coming soon badge */
-.badge{
-  position:absolute;top:1rem;right:1rem;
-  background:linear-gradient(135deg,var(--gold),var(--gold-light));
-  color:var(--navy);
-  font-size:.65rem;
-  font-weight:700;
-  letter-spacing:.1em;
-  text-transform:uppercase;
-  padding:.3rem .7rem;
-  border-radius:6px;
-}
+    @app.route("/players/<slug>")
+    def player_page(slug):
+        import development
+        import profiles
+        p = profiles.profile(_engine(), slug)
+        if not p:
+            return render_template("notfound.html", nav="players", slug=slug), 404
+        return render_template(
+            "player.html", nav="players", p=p,
+            writes_enabled=writes_enabled(),
+            metric_options=development.goal_metric_options(),
+            directions=db.GOAL_DIRECTIONS,
+            categories=db.INTERVENTION_CATEGORIES)
 
-/* ===== FOOTER ===== */
-.footer{
-  text-align:center;
-  padding:2.5rem 1rem;
-  border-top:1px solid rgba(197,165,90,.12);
-  font-size:.78rem;
-  color:rgba(255,255,255,.35);
-  letter-spacing:.06em;
-}
-.footer span{color:var(--gold);opacity:.6}
+    @app.route("/team")
+    def team_page():
+        import profiles
+        return render_template("team.html", nav="team",
+                               o=profiles.team_overview(_engine()),
+                               writes_enabled=writes_enabled())
 
-/* ===== RESPONSIVE ===== */
-@media(max-width:960px){
-  .cards-grid{grid-template-columns:repeat(2,1fr)}
-}
-@media(max-width:600px){
-  .cards-grid{grid-template-columns:1fr}
-  .hero{min-height:60vh}
-  .shield-logo{width:100px;height:100px}
-  .section{padding:3rem 1rem 4rem}
-}
+    @app.route("/prep")
+    def prep_page():
+        return render_template(
+            "toolpage.html", nav="prep", heading="Game Prep",
+            blurb="Opponent scouting, matchup analysis, umpire information and the "
+                  "scouting AI.",
+            tools=tools.by_category("prep"))
 
-/* ===== ENTRANCE ANIMATIONS ===== */
-@keyframes fadeInUp{
-  from{opacity:0;transform:translateY(20px)}
-  to{opacity:1;transform:translateY(0)}
-}
-.hero-content>*{animation:fadeInUp .8s ease both}
-.hero-content>*:nth-child(1){animation-delay:.1s}
-.hero-content>*:nth-child(2){animation-delay:.25s}
-.hero-content>*:nth-child(3){animation-delay:.4s}
-.hero-content>*:nth-child(4){animation-delay:.55s}
-</style>
-</head>
-<body>
+    @app.route("/video")
+    def video_page():
+        return render_template(
+            "toolpage.html", nav="video", heading="Video",
+            blurb="Game video search and delivery overlay comparisons.",
+            tools=tools.by_category("video"))
 
-<!-- ====== HERO ====== -->
-<section class="hero">
-  <div class="hero-content">
-    <img src="/shield.png" alt="Moeller Shield" class="shield-logo"/>
-    <div class="hero-divider"></div>
-    <h1 class="hero-title">Moeller Baseball Analytics</h1>
-  </div>
-  <div class="scroll-hint">
-    <span>Explore Tools</span>
-    <div class="scroll-arrow"></div>
-  </div>
-</section>
+    @app.route("/tools")
+    def tools_page():
+        return render_template(
+            "toolpage.html", nav="tools", heading="Tools",
+            blurb="Every analytics tool. These stay exactly as they are — they're "
+                  "the infrastructure the player pages are built on.",
+            tools=tools.TOOLS)
 
-<!-- ====== COACH ASSISTANT ====== -->
-<section class="section ca-sec" id="assistant">
-  <p class="section-label">Ask The Data</p>
-  <h2 class="section-title">Coach Assistant</h2>
-  <div class="ca-box">
-    <div class="ca-msgs" id="caMsgs">
-      <div class="ca-hint">
-        <p>Ask anything about Moeller baseball — season stats, pitchers, hitters, bullpens.</p>
-        <div class="ca-chips">
-          <span class="ca-chip">Who led the team in AVG in 2026?</span>
-          <span class="ca-chip">What was Jack Ujvagi&rsquo;s best pitch?</span>
-          <span class="ca-chip">How do our off-season bullpens look?</span>
-        </div>
-      </div>
-    </div>
-    <div class="ca-input">
-      <input type="text" id="caText" placeholder="Ask about Moeller data…" maxlength="500"/>
-      <button id="caSend">Ask</button>
-    </div>
-  </div>
-</section>
+    # -----------------------------------------------------------------------
+    # Player APIs (spec section 8.5)
+    # -----------------------------------------------------------------------
 
-<!-- ====== TOOLS SECTION ====== -->
-<section class="section" id="tools">
-  <p class="section-label">Analytics Suite</p>
-  <h2 class="section-title">Your Competitive Edge</h2>
+    @app.route("/api/players/<int:player_id>/timeline")
+    def api_timeline(player_id):
+        import profiles
+        from sqlalchemy import select
+        with _engine().connect() as conn:
+            row = conn.execute(select(db.players.c.slug)
+                               .where(db.players.c.id == player_id)).first()
+        if not row:
+            return jsonify({"error": "no such player"}), 404
+        p = profiles.profile(_engine(), row.slug)
+        return jsonify({"sessions": p["training"], "changes": p["changes"]})
 
-  <div class="cards-grid">
+    @app.route("/api/players/<int:player_id>/metric/<metric_key>")
+    def api_metric(player_id, metric_key):
+        import profiles
+        if not metrics.known(metric_key):
+            return jsonify({"error": f"unknown metric '{metric_key}'"}), 404
+        return jsonify(profiles.metric_series(_engine(), player_id, metric_key))
 
-    <!-- 1. Game Prep Agent -->
-    <div class="card">
-      <div class="card-icon">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
-      </div>
-      <h3 class="card-title">Scouting Agent</h3>
-      <p class="card-desc">Our scouting tool that allows you to ask questions and get information from the data we have collected.</p>
-      <a href="https://web-production-510f.up.railway.app/" target="_blank" class="card-btn">
-        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-      </a>
-    </div>
+    @app.route("/api/changes")
+    def api_changes():
+        import profiles
+        return jsonify(profiles.team_overview(_engine())["changes"])
 
-    <!-- 2. Pitcher Cards -->
-    <div class="card">
-      <div class="card-icon">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M8 2s1.5 2 4 2 4-2 4-2"/></svg>
-      </div>
-      <h3 class="card-title">Pitcher Cards</h3>
-      <p class="card-desc">Pitcher information and updates for quick reference before and during games.</p>
-      <a href="https://web-production-08767.up.railway.app/" target="_blank" class="card-btn">
-        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-      </a>
-    </div>
+    @app.route("/api/changes/<int:event_id>/acknowledge", methods=["POST"])
+    def api_acknowledge(event_id):
+        import changes
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        undo = bool((request.get_json(silent=True) or {}).get("undo"))
+        changes.acknowledge(_engine(), event_id, acknowledged=not undo)
+        return jsonify({"ok": True, "acknowledged": not undo})
 
-    <!-- 3. Hitter Cards -->
-    <div class="card">
-      <div class="card-icon">
-        <svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M4 20V10l4-6h8l4 6v10"/><rect x="8" y="12" width="8" height="8" rx="1"/><line x1="12" y1="12" x2="12" y2="8"/></svg>
-      </div>
-      <h3 class="card-title">Hitter Cards</h3>
-      <p class="card-desc">Hitter information and updates that can be used for player evaluation, planning, and in-game reference.</p>
-      <a href="https://web-production-51eb5b.up.railway.app/" target="_blank" class="card-btn">
-        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-      </a>
-    </div>
+    @app.route("/api/changes/detect", methods=["POST"])
+    def api_detect():
+        """Run change detection now. Also called after every ingest commit, and
+        by the nightly job."""
+        import changes
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        data = request.get_json(silent=True) or {}
+        result = changes.compute_all(
+            _engine(), write=not data.get("dry_run"),
+            player_id=data.get("player_id"))
+        result.pop("events", None)      # keep the response small
+        return jsonify(result)
 
-    <!-- 4. Umpire Cards -->
-    <div class="card">
-      <div class="card-icon">
-        <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-      </div>
-      <h3 class="card-title">Umpire Cards</h3>
-      <p class="card-desc">Quick reference tool for umpire information and game-use situations.</p>
-      <a href="https://web-production-196103.up.railway.app/" target="_blank" class="card-btn">
-        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-      </a>
-    </div>
+    @app.route("/api/interventions/<int:intervention_id>/evaluate", methods=["POST"])
+    def api_evaluate_intervention(intervention_id):
+        import changes
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        res = changes.evaluate_intervention(_engine(), intervention_id)
+        if res is None:
+            return jsonify({"error": "no such intervention"}), 404
+        return jsonify(res)
 
-    <!-- 5. Team Stats -->
-    <div class="card">
-      <div class="card-icon">
-        <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
-      </div>
-      <h3 class="card-title">Team Stats</h3>
-      <p class="card-desc">Full team batting and pitching stats dashboard with leaderboards and Synergy scouting.</p>
-      <p style="font-size:12px;color:#C5A55A;margin-top:6px;">Login: <strong>moeller</strong> &nbsp;|&nbsp; Password: <strong>moeller1</strong></p>
-      <a href="https://moeller-2026-stats-production.up.railway.app/login" target="_blank" class="card-btn">
-        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-      </a>
-    </div>
+    # -----------------------------------------------------------------------
+    # Goals and interventions (spec section 5.5) -- validation lives in
+    # development.py, so these handlers stay thin.
+    # -----------------------------------------------------------------------
 
-    <!-- 6. AWRE Video Search -->
-    <div class="card">
-      <div class="card-icon">
-        <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      </div>
-      <h3 class="card-title">AWRE Video Search</h3>
-      <p class="card-desc">Search game video by team, player, pitch type, and result. Filter 9,600+ pitches across 45 games with multi-angle playback.</p>
-      <a href="https://web-production-12b79.up.railway.app/" target="_blank" class="card-btn">
-        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-      </a>
-    </div>
+    def _dev_call(fn, *a, **kw):
+        import development
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        try:
+            return jsonify({"ok": True, "result": fn(*a, **kw)})
+        except development.DevError as e:
+            return jsonify({"error": str(e)}), 400
 
-    <!-- 7. Charting App -->
-    <div class="card">
-      <div class="card-icon">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 4.5c2 3 2 12 0 15"/><path d="M15.5 4.5c-2 3-2 12 0 15"/></svg>
-      </div>
-      <h3 class="card-title">Charting App</h3>
-      <p class="card-desc">Pitch-by-pitch charting for off-season bullpens and live ABs. Tap the attack zone, log the pitch, and the coach dashboard updates behind it.</p>
-      <a href="https://moeller-charting-production.up.railway.app/" target="_blank" class="card-btn">
-        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-      </a>
-    </div>
+    @app.route("/api/goals", methods=["POST"])
+    def api_create_goal():
+        import development
+        d = request.get_json(silent=True) or request.form.to_dict() or {}
+        return _dev_call(
+            development.create_goal, _engine(),
+            player_id=int(d.get("player_id") or 0),
+            title=d.get("title"), metric_key=d.get("metric_key") or None,
+            direction=d.get("direction") or None,
+            target_value=d.get("target_value") if d.get("target_value") not in ("", None) else None,
+            detail=d.get("detail"), set_by=d.get("set_by"),
+            set_on=d.get("set_on"), review_on=d.get("review_on"))
 
-    <!-- 8. Pitch Overlays -->
-    <div class="card">
-      <div class="card-icon">
-        <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><path d="M7 10l3 3 7-7" stroke-width="2"/></svg>
-      </div>
-      <h3 class="card-title">Pitch Overlays</h3>
-      <p class="card-desc">Delivery overlay comparisons by pitcher. Side-by-side and stacked views synced to release point for mechanical analysis.</p>
-      <a href="https://drive.google.com/drive/folders/1gruNdqaNpmhgRp2_4qdidSIRP12vnfkh?usp=sharing" target="_blank" class="card-btn">
-        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-      </a>
-    </div>
+    @app.route("/api/goals/<int:goal_id>", methods=["POST", "DELETE"])
+    def api_update_goal(goal_id):
+        import development
+        if request.method == "DELETE":
+            return _dev_call(development.delete_goal, _engine(), goal_id)
+        d = request.get_json(silent=True) or {}
+        return _dev_call(development.update_goal, _engine(), goal_id,
+                         status=d.get("status"), review_on=d.get("review_on"),
+                         detail=d.get("detail"), target_value=d.get("target_value"))
 
-  </div>
-</section>
+    @app.route("/api/interventions", methods=["POST"])
+    def api_create_intervention():
+        import development
+        d = request.get_json(silent=True) or request.form.to_dict() or {}
+        return _dev_call(
+            development.create_intervention, _engine(),
+            player_id=int(d.get("player_id") or 0),
+            title=d.get("title"),
+            intervention_date=d.get("intervention_date"),
+            category=d.get("category") or None, detail=d.get("detail"),
+            coach=d.get("coach"),
+            goal_id=int(d["goal_id"]) if d.get("goal_id") else None,
+            review_on=d.get("review_on"))
 
-<!-- ====== FOOTER ====== -->
-<footer class="footer">
-  Moeller Baseball Analytics <span>|</span> @MoeAnalytics
-</footer>
+    @app.route("/api/interventions/<int:intervention_id>", methods=["POST", "DELETE"])
+    def api_update_intervention(intervention_id):
+        import development
+        if request.method == "DELETE":
+            return _dev_call(development.delete_intervention, _engine(),
+                             intervention_id)
+        d = request.get_json(silent=True) or {}
+        return _dev_call(development.update_intervention, _engine(), intervention_id,
+                         outcome=d.get("outcome"), review_on=d.get("review_on"),
+                         detail=d.get("detail"))
 
-<!-- ====== COACH ASSISTANT (styles + logic; markup sits mid-page) ====== -->
-<style>
-.ca-sec{max-width:860px;padding:3.5rem 1.5rem 0}
-.ca-box{
-  background:var(--glass);
-  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
-  border:1px solid var(--glass-border);border-radius:16px;overflow:hidden;
-  box-shadow:0 16px 50px rgba(0,0,0,.35);
-}
-.ca-msgs{
-  min-height:190px;max-height:460px;overflow-y:auto;padding:1.2rem;
-  display:flex;flex-direction:column;gap:.6rem;
-}
-.ca-msg{max-width:85%;padding:.65rem .9rem;border-radius:12px;font-size:.9rem;
-  line-height:1.55;white-space:pre-wrap;word-wrap:break-word}
-.ca-user{align-self:flex-end;background:var(--gold-dim);border:1px solid var(--glass-border);
-  border-bottom-right-radius:4px}
-.ca-bot{align-self:flex-start;background:rgba(26,26,46,.8);border:1px solid rgba(255,255,255,.08);
-  border-bottom-left-radius:4px}
-.ca-hint{color:rgba(255,255,255,.5);font-size:.88rem;text-align:center;margin:auto 0;
-  padding:0 1rem;line-height:1.7}
-.ca-chips{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;margin-top:.9rem}
-.ca-chip{
-  padding:.5rem .95rem;border:1px solid var(--glass-border);border-radius:999px;
-  color:var(--gold);font-size:.8rem;cursor:pointer;user-select:none;
-  transition:all .2s;-webkit-tap-highlight-color:transparent;
-}
-.ca-chip:hover{background:var(--gold-dim);border-color:var(--gold)}
-.ca-typing{align-self:flex-start;color:var(--gold);font-size:1.1rem;letter-spacing:.2em;
-  animation:caPulse 1.2s ease-in-out infinite}
-@keyframes caPulse{0%,100%{opacity:.35}50%{opacity:1}}
-.ca-input{
-  display:flex;gap:.5rem;padding:.8rem;border-top:1px solid var(--glass-border);
-}
-.ca-input input{
-  flex:1;padding:.7rem .9rem;background:rgba(15,15,30,.75);
-  border:1px solid var(--glass-border);border-radius:9px;color:var(--white);
-  font-size:.95rem;font-family:inherit;outline:none;
-}
-.ca-input input:focus{border-color:var(--gold)}
-.ca-input button{
-  padding:.7rem 1.3rem;border:none;border-radius:9px;cursor:pointer;
-  background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy);
-  font-weight:700;font-size:.82rem;letter-spacing:.06em;text-transform:uppercase;
-}
-.ca-input button:disabled{opacity:.5;cursor:wait}
-</style>
+    @app.route("/api/reviews-due")
+    def api_reviews_due():
+        import development
+        return jsonify(development.due_for_review(_engine()))
 
-<script>
-(function(){
-  const msgs=document.getElementById('caMsgs'), input=document.getElementById('caText'),
-        send=document.getElementById('caSend');
-  const hist=[];
-  let busy=false;
+    # -----------------------------------------------------------------------
+    # AI summaries (spec section 9.2/9.3). Generating costs an API call, so it
+    # is an explicit action -- never something a page view triggers.
+    # -----------------------------------------------------------------------
 
-  // tapping an example question asks it
-  msgs.addEventListener('click',e=>{
-    const chip=e.target.closest('.ca-chip');
-    if(chip){input.value=chip.textContent;ask();}
-  });
+    @app.route("/api/players/<int:player_id>/summary", methods=["GET", "POST"])
+    def api_summary(player_id):
+        import summaries
+        engine = _engine()
+        if request.method == "GET":
+            hit = summaries.cached(engine, player_id)
+            return jsonify(hit or {"summary": None, "note": "no current summary"})
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        force = bool((request.get_json(silent=True) or {}).get("force"))
+        try:
+            return jsonify(summaries.generate(engine, player_id, force=force))
+        except Exception as e:
+            return jsonify({"error": f"Could not write a summary: {e}"}), 500
 
-  function bubble(cls,text){
-    const hint=msgs.querySelector('.ca-hint'); if(hint)hint.remove();
-    const el=document.createElement('div'); el.className='ca-msg '+cls; el.textContent=text;
-    msgs.appendChild(el); msgs.scrollTop=msgs.scrollHeight; return el;
-  }
+    @app.route("/api/summaries/weekly", methods=["POST"])
+    def api_weekly_summaries():
+        import summaries
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        d = request.get_json(silent=True) or {}
+        res = summaries.run_weekly(_engine(), everyone=bool(d.get("all")),
+                                   dry_run=bool(d.get("dry_run")))
+        res.pop("results", None)
+        return jsonify(res)
 
-  async function ask(){
-    const q=input.value.trim();
-    if(!q||busy)return;
-    busy=true; send.disabled=true; input.value='';
-    bubble('ca-user',q); hist.push({role:'user',text:q});
-    const typing=document.createElement('div');
-    typing.className='ca-typing'; typing.textContent='•••';
-    msgs.appendChild(typing); msgs.scrollTop=msgs.scrollHeight;
-    try{
-      const r=await fetch('/api/agent',{method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({messages:hist})});
-      const d=await r.json().catch(()=>({}));
-      typing.remove();
-      const reply=(r.ok&&d.reply)?d.reply:(d.error||'Something went wrong — try again.');
-      bubble('ca-bot',reply);
-      if(r.ok&&d.reply)hist.push({role:'assistant',text:d.reply});
-    }catch(e){
-      typing.remove();
-      bubble('ca-bot','Could not reach the assistant — check your connection and try again.');
-    }finally{
-      busy=false; send.disabled=false; input.focus();
-    }
-  }
-  send.addEventListener('click',ask);
-  input.addEventListener('keydown',e=>{if(e.key==='Enter')ask();});
-})();
-</script>
-
-<!-- ====== SCROLL ANIMATIONS ====== -->
-<script>
-(function(){
-  const cards=document.querySelectorAll('.card');
-  const observer=new IntersectionObserver((entries)=>{
-    entries.forEach((entry,i)=>{
-      if(entry.isIntersecting){
-        setTimeout(()=>{entry.target.classList.add('visible')},i*100);
-        observer.unobserve(entry.target);
-      }
-    });
-  },{threshold:0.15});
-  cards.forEach(c=>observer.observe(c));
-})();
-</script>
-</body>
-</html>"""
+    return app
 
 
-@app.route("/")
-def index():
-    return render_template_string(HTML)
+# Module-level, because the Procfile runs `gunicorn app:app`.
+app = create_app()
 
 
 if __name__ == "__main__":

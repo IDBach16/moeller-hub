@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>{% block title %}Moeller Baseball Analytics{% endblock %}</title>
+<link rel="icon" href="/moeller-logo.png"/>
+<link rel="apple-touch-icon" href="/moeller-logo.png"/>
+<link rel="manifest" href="/manifest.json"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Moeller Baseball"/>
+<meta name="theme-color" content="#1a1a2e"/>
+<style>
+/* ===== RESET & BASE ===== */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --navy:#1a1a2e;
+  --navy-deep:#0f0f1e;
+  --gold:#C5A55A;
+  --gold-light:#d4ba78;
+  --gold-dim:rgba(197,165,90,.15);
+  --white:#ffffff;
+  --glass:rgba(26,26,46,.55);
+  --glass-border:rgba(197,165,90,.2);
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  background:var(--navy-deep);
+  color:var(--white);
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ===== NAV (spec 8.1) ===== */
+.nav{
+  position:sticky;top:0;z-index:50;
+  display:flex;align-items:center;gap:1.4rem;
+  padding:.75rem 1.5rem;
+  background:rgba(15,15,30,.82);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(197,165,90,.16);
+}
+.nav-brand{display:flex;align-items:center;gap:.6rem;text-decoration:none;flex-shrink:0}
+.nav-brand img{width:30px;height:30px;object-fit:contain}
+.nav-brand span{
+  font-size:.78rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--white);white-space:nowrap;
+}
+.nav-links{display:flex;gap:.3rem;flex-wrap:wrap;margin-left:auto}
+.nav-links a{
+  padding:.42rem .8rem;border-radius:7px;text-decoration:none;
+  font-size:.78rem;font-weight:600;letter-spacing:.05em;
+  color:rgba(255,255,255,.62);transition:all .2s ease;white-space:nowrap;
+}
+.nav-links a:hover{color:var(--gold);background:var(--gold-dim)}
+.nav-links a.active{color:var(--gold);background:var(--gold-dim)}
+@media(max-width:760px){
+  .nav{flex-wrap:wrap;gap:.6rem;padding:.7rem 1rem}
+  .nav-links{margin-left:0;width:100%;justify-content:flex-start}
+  .nav-links a{padding:.35rem .6rem;font-size:.73rem}
+}
+
+/* ===== HERO ===== */
+.hero{
+  position:relative;
+  min-height:70vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  overflow:hidden;
+}
+.hero::before{
+  content:'';
+  position:absolute;inset:0;
+  background:url('/bg-field.jpg') center/cover no-repeat fixed;
+  filter:brightness(.35) saturate(.8);
+  z-index:0;
+}
+.hero::after{
+  content:'';
+  position:absolute;inset:0;
+  background:linear-gradient(
+    180deg,
+    rgba(15,15,30,.6) 0%,
+    rgba(15,15,30,.3) 40%,
+    rgba(15,15,30,.85) 100%
+  );
+  z-index:1;
+}
+.hero-content{position:relative;z-index:2;padding:2rem 1rem}
+
+/* Shield logo */
+.shield-logo{
+  width:140px;height:140px;
+  object-fit:contain;
+  margin-bottom:1.5rem;
+  filter:drop-shadow(0 0 30px rgba(197,165,90,.4));
+  animation:shieldPulse 4s ease-in-out infinite;
+}
+@keyframes shieldPulse{
+  0%,100%{filter:drop-shadow(0 0 20px rgba(197,165,90,.3))}
+  50%{filter:drop-shadow(0 0 40px rgba(197,165,90,.6))}
+}
+
+.hero-title{
+  font-size:clamp(2rem,5vw,3.5rem);
+  font-weight:900;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  background:linear-gradient(135deg,var(--white) 0%,var(--gold) 50%,var(--white) 100%);
+  background-size:200% auto;
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation:shimmer 6s linear infinite;
+  margin-bottom:.5rem;
+}
+@keyframes shimmer{
+  0%{background-position:0% center}
+  100%{background-position:200% center}
+}
+
+/* Divider */
+.hero-divider{
+  width:80px;height:2px;
+  background:linear-gradient(90deg,transparent,var(--gold),transparent);
+  margin:1.2rem auto;
+}
+
+/* Scroll indicator -- centred with left/right:0 rather than a translateX,
+   because the fadeInUp animation's final transform would overwrite it and
+   push the hint off-centre. */
+.scroll-hint{
+  position:absolute;bottom:2rem;left:0;right:0;
+  z-index:2;
+  display:flex;flex-direction:column;align-items:center;gap:.4rem;
+  opacity:.5;animation:fadeInUp 1s .8s both;
+}
+.scroll-hint span{font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;color:var(--gold-light)}
+.scroll-arrow{
+  width:20px;height:20px;
+  border-right:2px solid var(--gold);border-bottom:2px solid var(--gold);
+  transform:rotate(45deg);
+  animation:bounce 2s infinite;
+}
+@keyframes bounce{
+  0%,100%{transform:rotate(45deg) translateY(0)}
+  50%{transform:rotate(45deg) translateY(6px)}
+}
+
+/* ===== CARDS SECTION ===== */
+.section{
+  max-width:1200px;
+  margin:0 auto;
+  padding:4rem 1.5rem 5rem;
+}
+.section-label{
+  text-align:center;
+  font-size:.75rem;
+  letter-spacing:.3em;
+  text-transform:uppercase;
+  color:var(--gold);
+  margin-bottom:.5rem;
+}
+.section-title{
+  text-align:center;
+  font-size:clamp(1.5rem,3vw,2.2rem);
+  font-weight:700;
+  margin-bottom:2.5rem;
+  color:var(--white);
+}
+
+.cards-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:1.5rem;
+}
+
+/* ===== CARD ===== */
+.card{
+  position:relative;
+  background:var(--glass);
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);
+  border:1px solid var(--glass-border);
+  border-radius:16px;
+  padding:2rem 1.5rem 1.8rem;
+  display:flex;flex-direction:column;
+  transition:transform .35s cubic-bezier(.22,1,.36,1),
+             box-shadow .35s ease,
+             border-color .35s ease;
+  overflow:hidden;
+  opacity:0;transform:translateY(30px);
+}
+.card.visible{
+  opacity:1;transform:translateY(0);
+  transition:opacity .6s ease,transform .6s cubic-bezier(.22,1,.36,1);
+}
+.card::before{
+  content:'';
+  position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,var(--gold),var(--gold-light),var(--gold));
+  opacity:0;transition:opacity .35s ease;
+}
+.card:hover{
+  transform:translateY(-6px);
+  box-shadow:0 20px 50px rgba(0,0,0,.4),0 0 30px rgba(197,165,90,.08);
+  border-color:rgba(197,165,90,.35);
+}
+.card:hover::before{opacity:1}
+
+.card-icon{
+  width:52px;height:52px;
+  border-radius:12px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--gold-dim);
+  margin-bottom:1.2rem;
+  flex-shrink:0;
+}
+.card-icon svg{width:26px;height:26px;stroke:var(--gold);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+.card-title{
+  font-size:1.15rem;
+  font-weight:700;
+  margin-bottom:.5rem;
+  color:var(--white);
+}
+.card-desc{
+  font-size:.88rem;
+  line-height:1.6;
+  color:rgba(255,255,255,.6);
+  flex:1;
+  margin-bottom:1.4rem;
+}
+
+.card-btn{
+  display:inline-flex;align-items:center;gap:.5rem;
+  padding:.65rem 1.4rem;
+  background:transparent;
+  border:1.5px solid var(--gold);
+  border-radius:8px;
+  color:var(--gold);
+  font-size:.82rem;
+  font-weight:600;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  text-decoration:none;
+  cursor:pointer;
+  transition:all .3s ease;
+  align-self:flex-start;
+}
+.card-btn:hover{
+  background:var(--gold);
+  color:var(--navy);
+  box-shadow:0 4px 20px rgba(197,165,90,.3);
+}
+.card-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+
+/* Coming soon badge */
+.badge{
+  position:absolute;top:1rem;right:1rem;
+  background:linear-gradient(135deg,var(--gold),var(--gold-light));
+  color:var(--navy);
+  font-size:.65rem;
+  font-weight:700;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  padding:.3rem .7rem;
+  border-radius:6px;
+}
+
+/* ===== SHARED PAGE FURNITURE (players / player / team / prep / video / collect) ===== */
+.page{max-width:1150px;margin:0 auto;padding:2.5rem 1.5rem 4rem}
+.page-head{display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:.4rem}
+.page-head h1{font-size:1.9rem;font-weight:800;letter-spacing:.02em}
+.page-head a{color:var(--gold);font-size:.8rem;text-decoration:none;
+  letter-spacing:.08em;text-transform:uppercase}
+.page-sub{color:rgba(255,255,255,.5);font-size:.9rem;line-height:1.6;
+  margin-bottom:2rem;max-width:70ch}
+
+.panel{
+  background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border:1px solid var(--glass-border);border-radius:14px;
+  padding:1.5rem;margin-bottom:1.5rem;
+}
+.panel h2{font-size:1.05rem;font-weight:700;margin-bottom:.3rem}
+.panel .hint{font-size:.82rem;color:rgba(255,255,255,.45);
+  margin-bottom:1.2rem;line-height:1.6}
+
+.warn{
+  border:1px solid rgba(227,127,127,.4);background:rgba(227,127,127,.08);
+  border-radius:10px;padding:.9rem 1.1rem;margin-bottom:1.5rem;
+  font-size:.85rem;line-height:1.6;color:#f0b9b9;
+}
+.note{
+  border:1px solid var(--glass-border);background:var(--gold-dim);
+  border-radius:10px;padding:.85rem 1.05rem;margin-bottom:1.2rem;
+  font-size:.83rem;line-height:1.6;color:rgba(255,255,255,.7);
+}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.9rem}
+label{display:block;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:.35rem}
+select,input[type=text],input[type=file],input[type=search],input[type=date],textarea{
+  width:100%;padding:.6rem .7rem;background:rgba(15,15,30,.75);
+  border:1px solid var(--glass-border);border-radius:8px;color:var(--white);
+  font-size:.88rem;font-family:inherit;outline:none;
+}
+select:focus,input:focus,textarea:focus{border-color:var(--gold)}
+select option{background:var(--navy);color:var(--white)}
+
+.btn{
+  display:inline-flex;align-items:center;gap:.45rem;padding:.6rem 1.2rem;
+  background:transparent;border:1.5px solid var(--gold);border-radius:8px;
+  color:var(--gold);font-size:.78rem;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;cursor:pointer;transition:all .25s ease;
+  font-family:inherit;text-decoration:none;
+}
+.btn:hover:not(:disabled){background:var(--gold);color:var(--navy)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.solid{background:linear-gradient(135deg,var(--gold),var(--gold-light));
+  color:var(--navy);border:none}
+.btn.ghost{border-color:rgba(255,255,255,.2);color:rgba(255,255,255,.6)}
+.btn.ghost:hover{background:rgba(255,255,255,.1);color:var(--white)}
+.btn-row{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1.2rem;align-items:center}
+
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--gold);padding:.5rem .6rem;border-bottom:1px solid var(--glass-border)}
+td{padding:.55rem .6rem;border-bottom:1px solid rgba(255,255,255,.06);
+  vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:.82rem}
+.muted{color:rgba(255,255,255,.4)}
+.samples{color:rgba(255,255,255,.4);font-size:.78rem}
+.scroll{overflow-x:auto}
+.empty{color:rgba(255,255,255,.35);font-size:.86rem;padding:.8rem 0;line-height:1.7}
+
+.pill{display:inline-block;padding:.2rem .6rem;border-radius:999px;font-size:.68rem;
+  font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.pill.ok{background:rgba(120,200,140,.15);color:#8fd9a4}
+.pill.pending{background:var(--gold-dim);color:var(--gold)}
+.pill.bad{background:rgba(227,127,127,.15);color:#e79a9a}
+.pill.flat{background:rgba(255,255,255,.08);color:rgba(255,255,255,.55)}
+
+/* ===== FOOTER ===== */
+.footer{
+  text-align:center;
+  padding:2.5rem 1rem;
+  border-top:1px solid rgba(197,165,90,.12);
+  font-size:.78rem;
+  color:rgba(255,255,255,.35);
+  letter-spacing:.06em;
+}
+.footer span{color:var(--gold);opacity:.6}
+.footer a{color:rgba(197,165,90,.75);text-decoration:none}
+.footer a:hover{color:var(--gold)}
+
+/* ===== RESPONSIVE ===== */
+@media(max-width:960px){
+  .cards-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:600px){
+  .cards-grid{grid-template-columns:1fr}
+  .hero{min-height:60vh}
+  .shield-logo{width:100px;height:100px}
+  .section{padding:3rem 1rem 4rem}
+}
+
+/* ===== ENTRANCE ANIMATIONS ===== */
+@keyframes fadeInUp{
+  from{opacity:0;transform:translateY(20px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.hero-content>*{animation:fadeInUp .8s ease both}
+.hero-content>*:nth-child(1){animation-delay:.1s}
+.hero-content>*:nth-child(2){animation-delay:.25s}
+.hero-content>*:nth-child(3){animation-delay:.4s}
+.hero-content>*:nth-child(4){animation-delay:.55s}
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+
+{% block nav %}
+<nav class="nav">
+  <a class="nav-brand" href="/">
+    <img src="/shield.png" alt=""/>
+    <span>Moeller Baseball</span>
+  </a>
+  <div class="nav-links">
+    <a href="/players"{% if nav=='players' %} class="active"{% endif %}>Players</a>
+    <a href="/team"{% if nav=='team' %} class="active"{% endif %}>Team Development</a>
+    <a href="/prep"{% if nav=='prep' %} class="active"{% endif %}>Game Prep</a>
+    <a href="/video"{% if nav=='video' %} class="active"{% endif %}>Video</a>
+    <a href="/collect"{% if nav=='collect' %} class="active"{% endif %}>Data Collection</a>
+    <a href="/tools"{% if nav=='tools' %} class="active"{% endif %}>Tools</a>
+  </div>
+</nav>
+{% endblock %}
+
+{% block body %}{% endblock %}
+
+<footer class="footer">
+  Moeller Baseball Analytics <span>|</span> @MoeAnalytics
+</footer>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

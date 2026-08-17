@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Player not found — Moeller Baseball Analytics{% endblock %}
+
+{% block body %}
+<div class="page">
+  <div class="page-head"><h1>No such player</h1></div>
+  <div class="panel">
+    <p class="empty">
+      Nothing on the roster matches <span class="mono">{{ slug }}</span>.
+      He may not have been seeded yet &mdash; the roster is built from the season pitch
+      data, so a player with no tracked pitches won't be there until he's added.
+    </p>
+    <div class="btn-row"><a class="btn" href="/players">Back to the roster</a></div>
+  </div>
+</div>
+{% endblock %}

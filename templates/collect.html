@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+{% block title %}Data Collection — Moeller Baseball Analytics{% endblock %}
+
+{% block head %}
+<style>
+/* Shared page furniture (.page/.panel/.btn/table/...) lives in base.html. */
+.result{margin-top:1.1rem;font-size:.85rem;line-height:1.8;white-space:pre-wrap;
+  font-family:ui-monospace,Consolas,monospace;color:rgba(255,255,255,.75)}
+.flag{color:var(--gold)}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+
+  <div class="page-head">
+    <h1>Data Collection</h1>
+  </div>
+  <p class="page-sub">
+    Drop a Blast, HitTrax or Rapsodo export in. The parser finds the header row,
+    shows you what it recognized, and asks you about the rest. Confirm each column
+    once and the mapping is remembered for every future export from that vendor.
+  </p>
+
+  {% if not writes_enabled %}
+  <div class="warn">
+    <strong>Uploads are disabled.</strong> The hub is currently public, and this page
+    writes player-development records. Set <span class="mono">HUB_PASSWORD</span> on the
+    Railway service to turn the coaches' login back on, and uploading re-enables itself.
+  </div>
+  {% endif %}
+
+  <!-- ============ UPLOAD ============ -->
+  <section class="panel">
+    <h2>1 &middot; Upload an export</h2>
+    <p class="hint">
+      CSV or Excel. Nothing is parsed into the database yet &mdash; the file is stored
+      whole first, so a mistake in mapping is always recoverable.
+    </p>
+    <form id="upForm">
+      <div class="grid">
+        <div>
+          <label for="vendor">Vendor</label>
+          <select id="vendor" name="vendor">
+            {% for v in vendors %}<option value="{{ v }}">{{ v|capitalize }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="side">Side</label>
+          <select id="side" name="side">
+            <option value="">Auto from vendor</option>
+            <option value="hitting">Hitting</option>
+            <option value="pitching">Pitching</option>
+          </select>
+        </div>
+        <div>
+          <label for="session_type">Session type</label>
+          <select id="session_type" name="session_type">
+            <option value="">Auto from vendor</option>
+            {% for s in session_types %}<option value="{{ s }}">{{ s.replace('_',' ')|title }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="purpose">Purpose</label>
+          <select id="purpose" name="purpose">
+            <option value="">Not specified</option>
+            {% for p in purposes %}<option value="{{ p }}">{{ p|title }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="uploaded_by">Your name</label>
+          <input type="text" id="uploaded_by" name="uploaded_by" placeholder="Coach"/>
+        </div>
+        <div>
+          <label for="file">File</label>
+          <input type="file" id="file" name="file" accept=".csv,.tsv,.txt,.xlsx,.xls"/>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button type="submit" class="btn solid" id="upBtn"
+          {% if not writes_enabled %}disabled{% endif %}>Upload</button>
+        <span class="muted" id="upMsg"></span>
+      </div>
+    </form>
+  </section>
+
+  <!-- ============ MAPPING ============ -->
+  <section class="panel" id="mapPanel" style="display:none">
+    <h2>2 &middot; Map the columns</h2>
+    <p class="hint">
+      Anything already known is filled in. For the rest, pick what the column holds &mdash;
+      or <em>Ignore</em>. You need a player column, a date column and at least one metric
+      before this file can be committed.
+    </p>
+    <div class="scroll">
+      <table id="mapTable">
+        <thead><tr>
+          <th>Source column</th><th>Sample values</th><th style="width:34%">Maps to</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="btn-row">
+      <button class="btn" id="saveMapBtn">Save mapping</button>
+      <button class="btn ghost" id="dryBtn">Preview commit</button>
+      <button class="btn solid" id="commitBtn">Commit to database</button>
+      <span class="muted" id="mapMsg"></span>
+    </div>
+    <div class="result" id="mapResult"></div>
+  </section>
+
+  <!-- ============ NAME REVIEW ============ -->
+  <section class="panel">
+    <h2>3 &middot; Names needing review <span class="muted">({{ reviews|length }})</span></h2>
+    <p class="hint">
+      Export names that didn't resolve to a Moeller Player ID. Accepting one writes an
+      alias, so that spelling resolves automatically from then on. Nothing here has been
+      attributed to a player yet.
+    </p>
+    {% if reviews %}
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Vendor</th><th>Name in the export</th><th>Best match</th>
+          <th>Score</th><th></th>
+        </tr></thead>
+        <tbody id="revBody">
+          {% for r in reviews %}
+          <tr data-id="{{ r.id }}">
+            <td class="muted">{{ r.vendor }}</td>
+            <td class="mono">{{ r.raw_name }}</td>
+            <td>
+              <select class="revPick" data-id="{{ r.id }}">
+                <option value="">— no match / not a current player —</option>
+              </select>
+            </td>
+            <td>{% if r.score %}<span class="pill {{ 'ok' if r.score >= 0.9 else 'pending' }}">{{ '%.2f'|format(r.score) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td style="white-space:nowrap">
+              <button class="btn revAccept" data-id="{{ r.id }}"
+                {% if not writes_enabled %}disabled{% endif %}>Accept</button>
+              <button class="btn ghost revReject" data-id="{{ r.id }}"
+                {% if not writes_enabled %}disabled{% endif %}>Dismiss</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">Nothing waiting.</p>
+    {% endif %}
+  </section>
+
+  <!-- ============ IMPORT HISTORY ============ -->
+  <section class="panel">
+    <h2>Recent imports</h2>
+    <p class="hint">Every uploaded file is kept whole, so anything here can be re-parsed later.</p>
+    {% if imports %}
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Vendor</th><th>File</th><th>Rows</th><th>Status</th>
+          <th>Result</th><th></th>
+        </tr></thead>
+        <tbody>
+          {% for i in imports %}
+          <tr>
+            <td class="muted">{{ i.id }}</td>
+            <td>{{ i.vendor }}</td>
+            <td class="mono">{{ i.filename }}</td>
+            <td>{{ i.rows }}</td>
+            <td>
+              <span class="pill {{ 'ok' if i.status=='committed' else ('bad' if i.status=='rejected' else 'pending') }}">{{ i.status }}</span>
+            </td>
+            <td class="samples">
+              {% if i.stats %}
+                {{ i.stats.sessions_new }} sessions, {{ i.stats.measurements }} values
+                {%- if i.stats.rows_unresolved_player %}, <span class="flag">{{ i.stats.rows_unresolved_player }} unresolved</span>{% endif %}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td><button class="btn ghost openImp" data-id="{{ i.id }}">Open</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">No imports yet.</p>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const METRIC_OPTIONS = {{ metric_options|tojson }};
+let CURRENT = null;   // the import being mapped
+
+const $ = s => document.querySelector(s);
+const upMsg = $('#upMsg'), mapMsg = $('#mapMsg'), mapResult = $('#mapResult');
+
+function optionsHtml(selected, suggestion){
+  let html = '<option value="">— unmapped —</option>';
+  let lastGroup = null, open = false;
+  for(const o of METRIC_OPTIONS){
+    if(o.group !== lastGroup){
+      if(open) html += '</optgroup>';
+      html += `<optgroup label="${o.group}">`; open = true; lastGroup = o.group;
+    }
+    const sel = (o.key === (selected || suggestion)) ? ' selected' : '';
+    const hint = (!selected && o.key === suggestion) ? ' ?' : '';
+    html += `<option value="${o.key}"${sel}>${o.label}${hint}</option>`;
+  }
+  if(open) html += '</optgroup>';
+  return html;
+}
+
+function renderMapping(a){
+  CURRENT = a;
+  $('#mapPanel').style.display = 'block';
+  const tb = $('#mapTable tbody');
+  tb.innerHTML = '';
+  for(const c of a.columns){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${c.column}</td>
+      <td class="samples">${(c.samples||[]).join(' · ') || '<span class="muted">—</span>'}</td>
+      <td><select class="colMap" data-col="${c.column}">${optionsHtml(c.mapped_to, c.suggestion)}</select></td>`;
+    tb.appendChild(tr);
+  }
+  const ready = a.ready;
+  $('#commitBtn').disabled = !ready;
+  mapMsg.textContent = ready
+    ? `Import #${a.import_id} · ${a.row_count} rows · ready to commit`
+    : `Import #${a.import_id} · still needs ${a.missing_roles.join(', ')}`;
+  mapMsg.className = ready ? 'muted' : 'flag';
+  $('#mapPanel').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// ---- upload
+$('#upForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = $('#file').files[0];
+  if(!f){ upMsg.textContent = 'Choose a file first.'; return; }
+  const fd = new FormData();
+  fd.append('file', f);
+  for(const k of ['vendor','side','session_type','purpose','uploaded_by'])
+    fd.append(k, $('#'+k).value);
+  $('#upBtn').disabled = true; upMsg.textContent = 'Uploading…';
+  try{
+    const r = await fetch('/api/import', {method:'POST', body:fd});
+    const d = await r.json();
+    if(!r.ok){ upMsg.textContent = d.error || 'Upload failed.'; return; }
+    upMsg.textContent = `Stored as import #${d.import_id}.`;
+    mapResult.textContent = '';
+    renderMapping(d.analysis);
+  }catch(err){ upMsg.textContent = 'Upload failed — ' + err; }
+  finally{ $('#upBtn').disabled = false; }
+});
+
+// ---- save mapping
+$('#saveMapBtn').addEventListener('click', async () => {
+  if(!CURRENT) return;
+  const mappings = {};
+  document.querySelectorAll('.colMap').forEach(s => {
+    if(s.value) mappings[s.dataset.col] = s.value;
+  });
+  mapMsg.textContent = 'Saving…';
+  const r = await fetch(`/api/import/${CURRENT.import_id}/map`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mappings, confirmed_by: $('#uploaded_by').value || null})});
+  const d = await r.json();
+  if(!r.ok){ mapMsg.textContent = d.error || 'Save failed.'; return; }
+  renderMapping(d.analysis);
+});
+
+function showStats(s){
+  const lines = [
+    `rows read              ${s.rows_read}`,
+    `sessions created       ${s.sessions_new}`,
+    `sessions already held  ${s.sessions_existing}`,
+    `measurements written   ${s.measurements}`,
+  ];
+  if(s.rows_unresolved_player) lines.push(`rows with an unknown player   ${s.rows_unresolved_player}  (${s.names_queued} name(s) queued for review)`);
+  if(s.rows_no_date) lines.push(`rows with an unreadable date  ${s.rows_no_date}`);
+  if(s.unknown_pitch_types) lines.push(`pitches with an unmapped type ${s.unknown_pitch_types}`);
+  if(s.synthesized_session_refs) lines.push(`sessions grouped by (player, date) because the export carried no session id: ${s.synthesized_session_refs}`);
+  mapResult.textContent = lines.join('\n');
+}
+
+$('#dryBtn').addEventListener('click', async () => {
+  if(!CURRENT) return;
+  mapResult.textContent = 'Previewing…';
+  const r = await fetch(`/api/import/${CURRENT.import_id}/commit`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({dry_run:true})});
+  const d = await r.json();
+  if(!r.ok){ mapResult.textContent = d.error || 'Preview failed.'; return; }
+  showStats(d);
+});
+
+$('#commitBtn').addEventListener('click', async () => {
+  if(!CURRENT) return;
+  $('#commitBtn').disabled = true;
+  mapResult.textContent = 'Committing…';
+  const r = await fetch(`/api/import/${CURRENT.import_id}/commit`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  const d = await r.json();
+  if(!r.ok){ mapResult.textContent = d.error || 'Commit failed.'; $('#commitBtn').disabled=false; return; }
+  showStats(d);
+  setTimeout(() => location.reload(), 2500);
+});
+
+$('#mapTable').addEventListener('change', () => { $('#commitBtn').disabled = true;
+  mapMsg.textContent = 'Save the mapping before committing.'; mapMsg.className='flag'; });
+
+// ---- open a past import
+document.querySelectorAll('.openImp').forEach(b => b.addEventListener('click', async () => {
+  const r = await fetch('/api/import/' + b.dataset.id);
+  const d = await r.json();
+  if(r.ok){ mapResult.textContent=''; renderMapping(d); }
+}));
+
+// ---- name review
+(async () => {
+  const picks = document.querySelectorAll('.revPick');
+  if(!picks.length) return;
+  const players = await (await fetch('/api/players')).json();
+  const rows = {{ reviews|tojson }};
+  const byId = {}; rows.forEach(r => byId[r.id] = r);
+  picks.forEach(sel => {
+    const suggested = (byId[sel.dataset.id]||{}).suggested_player_id;
+    for(const p of players){
+      const o = document.createElement('option');
+      o.value = p.id; o.textContent = p.name;
+      if(p.id === suggested) o.selected = true;
+      sel.appendChild(o);
+    }
+  });
+})();
+
+async function reviewAction(id, action, body){
+  const r = await fetch(`/api/reviews/${id}/${action}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body||{})});
+  const d = await r.json();
+  const tr = document.querySelector(`tr[data-id="${id}"]`);
+  if(!r.ok){ if(tr) tr.style.outline='1px solid #e37f7f'; alert(d.error||'Failed'); return; }
+  if(tr){ tr.style.opacity='.35'; tr.querySelectorAll('button').forEach(b=>b.disabled=true); }
+}
+document.querySelectorAll('.revAccept').forEach(b => b.addEventListener('click', () => {
+  const sel = document.querySelector(`.revPick[data-id="${b.dataset.id}"]`);
+  if(!sel.value){ alert('Pick a player first, or dismiss this name.'); return; }
+  reviewAction(b.dataset.id, 'accept', {player_id: parseInt(sel.value,10)});
+}));
+document.querySelectorAll('.revReject').forEach(b => b.addEventListener('click', () =>
+  reviewAction(b.dataset.id, 'reject')));
+</script>
+{% endblock %}

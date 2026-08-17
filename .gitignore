@@ -1,3 +1,8 @@
 __pycache__/
 *.pyc
 .env
+
+# Local player-development database. Production uses Railway Postgres via
+# DATABASE_URL; this file only exists when running the hub on your machine.
+playerdev.db
+*.db

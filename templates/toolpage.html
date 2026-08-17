@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} — Moeller Baseball Analytics{% endblock %}
+
+{% block head %}
+<style>
+/* The cards are the originals -- .card styling lives in base.html. Only the
+   entrance animation differs: these pages have no hero to scroll past, so the
+   cards start visible rather than waiting on the observer. */
+.card{opacity:1;transform:none}
+.cards-grid{margin-top:.5rem}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+  <div class="page-head"><h1>{{ heading }}</h1></div>
+  <p class="page-sub">{{ blurb }}</p>
+
+  {% if tools %}
+  <div class="cards-grid">
+    {% for t in tools %}
+    <div class="card visible">
+      <div class="card-icon"><svg viewBox="0 0 24 24">{{ t.icon|safe }}</svg></div>
+      <h3 class="card-title">{{ t.title }}</h3>
+      <p class="card-desc">{{ t.desc }}</p>
+      {% if t.note %}<p style="font-size:12px;color:var(--gold);margin:-.8rem 0 1rem">{{ t.note|safe }}</p>{% endif %}
+      <a href="{{ t.url }}" target="_blank" class="card-btn">
+        Launch <svg viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="panel"><p class="empty">Nothing here yet.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

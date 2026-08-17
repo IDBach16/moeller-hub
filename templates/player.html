@@ -1,0 +1,635 @@
+{% extends "base.html" %}
+{% block title %}{{ p.player.name }} — Moeller Baseball Analytics{% endblock %}
+
+{% block head %}
+<style>
+.phead{display:flex;align-items:flex-start;gap:1.2rem;flex-wrap:wrap;margin-bottom:.3rem}
+.phead h1{font-size:2.1rem;font-weight:800;letter-spacing:.01em}
+.phead .meta{color:rgba(255,255,255,.5);font-size:.88rem;margin-top:.35rem}
+.phead .spacer{flex:1}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.9rem}
+.tile{
+  background:rgba(15,15,30,.5);border:1px solid var(--glass-border);
+  border-radius:11px;padding:.9rem 1rem;
+}
+.tile .lbl{font-size:.68rem;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:.4rem}
+.tile .val{font-size:1.55rem;font-weight:800;line-height:1.1}
+.tile .val .u{font-size:.8rem;font-weight:600;color:rgba(255,255,255,.4);margin-left:.15rem}
+.tile .cmp{font-size:.75rem;margin-top:.35rem;color:rgba(255,255,255,.4)}
+.tile .cmp.good{color:#8fd9a4}
+.tile .cmp.bad{color:#e79a9a}
+
+.sec-split{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+@media(max-width:900px){.sec-split{grid-template-columns:1fr}}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:.35rem 1.1rem;font-size:.87rem}
+.kv dt{color:rgba(255,255,255,.45)}
+.kv dd{font-weight:600}
+
+.chg{display:flex;gap:.8rem;align-items:flex-start;padding:.7rem 0;
+  border-bottom:1px solid rgba(255,255,255,.06)}
+.chg:last-child{border-bottom:none}
+.chg .dot{width:8px;height:8px;border-radius:50%;margin-top:.45rem;flex-shrink:0}
+.chg .dot.good{background:#8fd9a4}
+.chg .dot.bad{background:#e79a9a}
+.chg .dot.flat{background:rgba(255,255,255,.3)}
+.chg .ttl{font-weight:600;font-size:.9rem}
+.chg .why{font-size:.8rem;color:rgba(255,255,255,.45);line-height:1.5;margin-top:.15rem}
+
+.blocked{
+  border:1px dashed rgba(197,165,90,.3);border-radius:10px;
+  padding:1rem 1.1rem;font-size:.83rem;line-height:1.65;
+  color:rgba(255,255,255,.45);
+}
+.blocked strong{color:rgba(255,255,255,.7)}
+
+/* ===== goals + interventions ===== */
+.item{padding:.9rem 0;border-bottom:1px solid rgba(255,255,255,.07)}
+.item:last-of-type{border-bottom:none}
+.item-top{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
+.item-title{font-weight:650;font-size:.94rem;margin-right:.5rem}
+.item-meta{font-size:.79rem;color:rgba(255,255,255,.42);margin-top:.25rem;line-height:1.55}
+.item-detail{font-size:.84rem;color:rgba(255,255,255,.62);margin-top:.4rem;line-height:1.55}
+.item-actions{display:flex;gap:.35rem;flex-shrink:0}
+.mini{
+  padding:.28rem .6rem;background:transparent;border:1px solid rgba(255,255,255,.18);
+  border-radius:6px;color:rgba(255,255,255,.55);font-size:.7rem;font-family:inherit;
+  cursor:pointer;letter-spacing:.04em;transition:all .2s;
+}
+.mini:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
+.mini:disabled{opacity:.35;cursor:not-allowed}
+
+.bar{height:5px;background:rgba(255,255,255,.09);border-radius:3px;
+  margin:.7rem 0 .4rem;overflow:hidden}
+.bar-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-light));
+  border-radius:3px}
+.prog-note{font-size:.78rem;color:rgba(255,255,255,.5);margin-top:.4rem}
+.prog-note.good{color:#8fd9a4}
+
+.prepost{margin-top:.7rem;padding:.7rem .85rem;background:rgba(15,15,30,.45);
+  border:1px solid rgba(255,255,255,.07);border-radius:9px}
+.prepost-head{font-size:.68rem;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:.5rem}
+.prepost-row{display:flex;justify-content:space-between;gap:.8rem;flex-wrap:wrap;
+  font-size:.8rem;padding:.22rem 0}
+.prepost-row.is-goal{font-weight:650}
+.pp-nums .good{color:#8fd9a4}
+.pp-nums .bad{color:#e79a9a}
+.pp-note{font-size:.74rem}
+.prepost-foot{font-size:.72rem;margin-top:.5rem;font-style:italic}
+
+.addform{margin-top:1rem;padding-top:1rem;border-top:1px solid var(--glass-border)}
+.addform .grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.good{color:#8fd9a4}
+.bad{color:#e79a9a}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+
+  <!-- ============ 1. HEADER ============ -->
+  <div class="phead">
+    <div>
+      <h1>{{ p.player.name }}</h1>
+      <div class="meta">
+        {{ 'Pitcher' if p.player.is_pitcher else 'Position player' }}
+        {%- if p.player.class_year %} &middot; Class of {{ p.player.class_year }}{% endif %}
+        {%- if p.player.bats %} &middot; Bats {{ p.player.bats }}{% endif %}
+        {%- if p.player.throws %} &middot; Throws {{ p.player.throws }}{% endif %}
+        {%- if p.last_session %} &middot; Last session {{ p.last_session }}
+        {%- else %} &middot; <span class="muted">no training sessions on record</span>{% endif %}
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <a href="/players" class="btn ghost">&larr; Roster</a>
+  </div>
+  <p class="page-sub"></p>
+
+  <!-- ============ 2. CURRENT STATUS ============ -->
+  {% if p.status %}
+  <section class="panel">
+    <h2>Current status</h2>
+    <p class="hint">Most recent session for each headline metric, against this player's own baseline.</p>
+    <div class="tiles">
+      {% for t in p.status %}
+      <div class="tile">
+        <div class="lbl">{{ t.label }}</div>
+        <div class="val">{{ t.value }}<span class="u">{{ t.unit }}</span></div>
+        {% if t.delta is not none %}
+          <div class="cmp {{ 'good' if t.favorable else ('bad' if t.favorable is false else '') }}">
+            {{ '+' if t.delta > 0 else '' }}{{ t.delta }} vs baseline {{ t.baseline }}
+          </div>
+        {% elif t.band %}
+          <div class="cmp {{ 'good' if t.in_band else 'bad' }}">
+            target {{ t.band[0] }}&ndash;{{ t.band[1] }}{{ t.unit }}
+          </div>
+        {% else %}
+          <div class="cmp">n={{ t.n }} &middot; {{ t.date }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- ============ 3. WHAT CHANGED ============ -->
+  <section class="panel">
+    <h2>What changed</h2>
+    <p class="hint">Meaningful moves against this player's own prior baseline &mdash; not against the team.</p>
+    {% if p.changes %}
+      {% for c in p.changes %}
+      <div class="chg">
+        <div class="dot {{ 'good' if c.favorable else ('bad' if c.favorable is false else 'flat') }}"></div>
+        <div>
+          <div class="ttl">{{ c.label }}
+            <span class="pill {{ 'ok' if c.severity == 'significant' else 'pending' }}">{{ c.severity }}</span>
+            {% if c.acknowledged %}<span class="pill flat">acknowledged</span>{% endif %}
+          </div>
+          <div class="why">
+            {{ c.summary }} &middot; detected {{ c.detected_on }}
+            &middot; effect size {{ c.effect_size }} on {{ c.n_recent }} vs {{ c.n_baseline }} observations
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="empty">
+        No changes detected yet. Change detection compares a recent window against a
+        baseline window, and needs enough sessions on both sides before it will say
+        anything &mdash; it stays quiet rather than reporting noise.
+      </p>
+    {% endif %}
+  </section>
+
+  <div class="sec-split">
+
+    <!-- ============ 4. TRAINING HISTORY ============ -->
+    <section class="panel">
+      <h2>Training history</h2>
+      <p class="hint">
+        {%- if p.player.is_pitcher %}Rapsodo and charted bullpens.{% else %}Blast and HitTrax sessions.{% endif %}
+        Session averages, never raw rows.
+      </p>
+      {% if p.training %}
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Purpose</th><th>Metrics</th></tr></thead>
+          <tbody>
+            {% for s in p.training[:15] %}
+            <tr>
+              <td class="mono">{{ s.date }}</td>
+              <td>{{ s.type.replace('_',' ')|title }}</td>
+              <td class="muted">{{ s.source }}</td>
+              <td>{% if s.purpose %}<span class="pill flat">{{ s.purpose }}</span>{% else %}<span class="muted">&mdash;</span>{% endif %}</td>
+              <td class="samples">
+                {% for k, m in s.metrics.items() %}{{ m.label }} {{ m.mean }}{{ m.unit }} (n={{ m.n }}){% if not loop.last %} &middot; {% endif %}{% endfor %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="empty">
+        No Blast, HitTrax or Rapsodo sessions for this player yet.
+        <a href="/collect" style="color:var(--gold)">Upload an export &rarr;</a>
+      </p>
+      {% endif %}
+    </section>
+
+    <!-- ============ 5. GAME PERFORMANCE ============ -->
+    <section class="panel">
+      <h2>Game performance</h2>
+      <p class="hint">AWRE tracked pitches, 2024&ndash;2026 &mdash; the competition layer.</p>
+
+      {% if p.game.pitching %}
+        {% set g = p.game.pitching %}
+        <dl class="kv">
+          <dt>Pitches</dt><dd>{{ '{:,}'.format(g.pitches) }}</dd>
+          <dt>Seasons</dt><dd>{{ g.years|join(', ') }}</dd>
+          <dt>Strike %</dt><dd>{{ g.strike_pct }}%</dd>
+          <dt>Whiff %</dt><dd>{{ g.whiff_pct }}%</dd>
+        </dl>
+        {% if g.pitch_types %}
+        <div class="scroll" style="margin-top:1rem">
+          <table>
+            <thead><tr><th>Pitch</th><th>Usage</th><th>Avg</th><th>Max</th><th>Strike%</th><th>Whiff%</th></tr></thead>
+            <tbody>
+              {% for t in g.pitch_types %}
+              <tr>
+                <td>{{ t.pitch_type }}</td>
+                <td>{{ t.usage_pct }}%</td>
+                <td>{{ t.avg_velo if t.avg_velo else '—' }}</td>
+                <td>{{ t.max_velo if t.max_velo else '—' }}</td>
+                <td>{{ t.strike_pct }}%</td>
+                <td>{{ t.whiff_pct if t.whiff_pct is not none else '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      {% endif %}
+
+      {% if p.game.batting %}
+        {% set b = p.game.batting %}
+        <dl class="kv" style="margin-top:{{ '1.2rem' if p.game.pitching else '0' }}">
+          <dt>Pitches seen</dt><dd>{{ '{:,}'.format(b.pitches_seen) }}</dd>
+          <dt>Whiff %</dt><dd>{{ b.whiff_pct if b.whiff_pct is not none else '—' }}</dd>
+          <dt>vs RHP</dt><dd>{{ b.vs_RHP.pitches_seen }} pitches, {{ b.vs_RHP.whiff_pct if b.vs_RHP.whiff_pct is not none else '—' }}% whiff</dd>
+          <dt>vs LHP</dt><dd>{{ b.vs_LHP.pitches_seen }} pitches, {{ b.vs_LHP.whiff_pct if b.vs_LHP.whiff_pct is not none else '—' }}% whiff</dd>
+        </dl>
+      {% endif %}
+
+      {% if not p.game.pitching and not p.game.batting %}
+        <p class="empty">No AWRE game data found for this player.</p>
+      {% endif %}
+
+      {% if p.official %}
+        <h2 style="margin-top:1.4rem;font-size:.95rem">Official 2026 stats</h2>
+        <div class="scroll" style="margin-top:.6rem">
+          <table>
+            <tbody>
+              {% for kind, row in p.official.items() %}
+                {% for k, v in row.items() %}
+                  {% if v is not none and v != '' %}
+                  <tr><td class="muted">{{ kind }} &middot; {{ k }}</td><td>{{ v }}</td></tr>
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="sec-split">
+
+    <!-- ============ 7. GOALS ============ -->
+    <section class="panel">
+      <h2>Development goals</h2>
+      <p class="hint">
+        Current coach-defined priorities. A measurable goal records where he was when
+        you set it, so progress has a starting line.
+      </p>
+
+      {% if p.goals %}
+        {% for g in p.goals %}
+        <div class="item" data-goal="{{ g.id }}">
+          <div class="item-top">
+            <div>
+              <span class="item-title">{{ g.title }}</span>
+              <span class="pill {{ 'ok' if g.status == 'met' else ('flat' if g.status in ('abandoned','superseded') else 'pending') }}">{{ g.status }}</span>
+            </div>
+            <div class="item-actions">
+              {% if g.status == 'active' %}
+              <button class="mini goalStatus" data-goal="{{ g.id }}" data-status="met"
+                {% if not writes_enabled %}disabled{% endif %}>Mark met</button>
+              <button class="mini goalStatus" data-goal="{{ g.id }}" data-status="abandoned"
+                {% if not writes_enabled %}disabled{% endif %}>Drop</button>
+              {% endif %}
+            </div>
+          </div>
+          <div class="item-meta">
+            {%- if g.metric_label %}{{ g.metric_label }} &middot; {{ g.direction.replace('_',' ') }}
+              {%- if g.target_value is not none %} to {{ g.target_value }}{{ g.unit }}{% endif %}
+            {%- else %}Narrative goal{% endif %}
+            {%- if g.set_by %} &middot; set by {{ g.set_by }}{% endif %}
+            {%- if g.set_on %} &middot; {{ g.set_on }}{% endif %}
+            {%- if g.review_on %} &middot; review {{ g.review_on }}{% endif %}
+          </div>
+          {% if g.detail %}<div class="item-detail">{{ g.detail }}</div>{% endif %}
+
+          {% set pr = g.progress %}
+          {% if pr.state == 'met' %}
+            <div class="prog-note good">Target reached &mdash; now at {{ pr.current }}{{ g.unit }}</div>
+          {% elif pr.state == 'in_progress' %}
+            {% if pr.pct is not none %}
+            <div class="bar"><div class="bar-fill" style="width:{{ pr.pct }}%"></div></div>
+            {% endif %}
+            <div class="prog-note">
+              {%- if pr.start is not none %}started {{ pr.start }}{{ g.unit }} &middot; {% endif -%}
+              now {{ pr.current }}{{ g.unit }} &middot; target {{ pr.target }}{{ g.unit }}
+              {%- if pr.pct is not none %} &middot; {{ pr.pct }}% of the way{% endif %}
+            </div>
+          {% elif pr.state == 'no_data' %}
+            <div class="prog-note muted">{{ pr.note }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="empty">No goals set for this player yet.</p>
+      {% endif %}
+
+      <div class="btn-row">
+        <button class="btn ghost" id="showGoal"
+          {% if not writes_enabled %}disabled{% endif %}>+ Add a goal</button>
+      </div>
+
+      <form class="addform" id="goalForm" style="display:none">
+        <div class="grid">
+          <div style="grid-column:1/-1">
+            <label for="g_title">Goal</label>
+            <input type="text" id="g_title" placeholder="e.g. Add a tick to the fastball" required/>
+          </div>
+          <div>
+            <label for="g_metric">Metric (optional)</label>
+            <select id="g_metric">
+              <option value="">Narrative — no metric</option>
+              {% for m in metric_options %}
+              <option value="{{ m.key }}" data-dir="{{ m.suggested_direction }}">{{ m.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="g_direction">Direction</label>
+            <select id="g_direction">
+              {% for d in directions %}<option value="{{ d }}">{{ d.replace('_',' ')|title }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="g_target">Target value</label>
+            <input type="text" id="g_target" placeholder="e.g. 88"/>
+          </div>
+          <div>
+            <label for="g_by">Set by</label>
+            <input type="text" id="g_by" placeholder="Coach"/>
+          </div>
+          <div>
+            <label for="g_review">Review on</label>
+            <input type="date" id="g_review"/>
+          </div>
+          <div style="grid-column:1/-1">
+            <label for="g_detail">Notes</label>
+            <textarea id="g_detail" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn solid">Save goal</button>
+          <button type="button" class="btn ghost" id="cancelGoal">Cancel</button>
+          <span class="muted" id="goalMsg"></span>
+        </div>
+      </form>
+    </section>
+
+    <!-- ============ 8. INTERVENTIONS ============ -->
+    <section class="panel">
+      <h2>Interventions</h2>
+      <p class="hint">
+        Grip changes, drills, swing changes, cues, strength blocks. The date is what
+        lets the engine cut the data into before and after.
+      </p>
+
+      {% if p.interventions %}
+        {% for i in p.interventions %}
+        <div class="item" data-iv="{{ i.id }}">
+          <div class="item-top">
+            <div>
+              <span class="item-title">{{ i.title }}</span>
+              <span class="pill {{ 'ok' if i.outcome == 'working' else ('bad' if i.outcome == 'reverted' else ('flat' if i.outcome == 'no_change' else 'pending')) }}">{{ i.outcome.replace('_',' ') }}</span>
+            </div>
+            <div class="item-actions">
+              <button class="mini ivEval" data-iv="{{ i.id }}"
+                {% if not writes_enabled %}disabled{% endif %}>Re-check</button>
+            </div>
+          </div>
+          <div class="item-meta">
+            {{ i.date }}{% if i.category %} &middot; {{ i.category.replace('_',' ') }}{% endif %}
+            {%- if i.coach %} &middot; {{ i.coach }}{% endif %}
+            {%- if i.review_on %} &middot; review {{ i.review_on }}{% endif %}
+          </div>
+          {% if i.detail %}<div class="item-detail">{{ i.detail }}</div>{% endif %}
+
+          {% if i.evaluation %}
+            <div class="prepost">
+              <div class="prepost-head">Before vs after</div>
+              {% for m in i.evaluation %}
+              <div class="prepost-row {{ 'is-goal' if m.is_goal_metric }}">
+                <span class="pp-label">{{ m.label }}{% if m.is_goal_metric %} <span class="muted">(goal)</span>{% endif %}</span>
+                <span class="pp-nums">
+                  {{ m.pre_mean }} &rarr; {{ m.post_mean }}{{ m.unit }}
+                  <span class="{{ 'good' if m.moved and m.favorable else ('bad' if m.moved and m.favorable is false else 'muted') }}">
+                    ({{ '+' if m.delta > 0 else '' }}{{ m.delta }})
+                  </span>
+                </span>
+                <span class="pp-note muted">
+                  {%- if m.moved %}effect {{ m.effect_size }}{% else %}within noise{% endif -%}
+                  , n={{ m.n_pre }}/{{ m.n_post }}
+                </span>
+              </div>
+              {% endfor %}
+              <div class="prepost-foot muted">
+                A comparison, not a cause. The coach decides what it means.
+              </div>
+            </div>
+          {% else %}
+            <div class="prog-note muted">
+              Not enough data on both sides of this date to compare yet.
+            </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="empty">Nothing logged for this player yet.</p>
+      {% endif %}
+
+      <div class="btn-row">
+        <button class="btn ghost" id="showIv"
+          {% if not writes_enabled %}disabled{% endif %}>+ Log an intervention</button>
+      </div>
+
+      <form class="addform" id="ivForm" style="display:none">
+        <div class="grid">
+          <div style="grid-column:1/-1">
+            <label for="i_title">What changed</label>
+            <input type="text" id="i_title" placeholder="e.g. New four-seam grip" required/>
+          </div>
+          <div>
+            <label for="i_date">Date</label>
+            <input type="date" id="i_date"/>
+          </div>
+          <div>
+            <label for="i_category">Category</label>
+            <select id="i_category">
+              <option value="">—</option>
+              {% for c in categories %}<option value="{{ c }}">{{ c.replace('_',' ')|title }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="i_goal">Against goal</label>
+            <select id="i_goal">
+              <option value="">—</option>
+              {% for g in p.goals %}{% if g.status == 'active' %}
+              <option value="{{ g.id }}">{{ g.title }}</option>{% endif %}{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="i_coach">Coach</label>
+            <input type="text" id="i_coach" placeholder="Coach"/>
+          </div>
+          <div>
+            <label for="i_review">Review on</label>
+            <input type="date" id="i_review"/>
+          </div>
+          <div style="grid-column:1/-1">
+            <label for="i_detail">Notes</label>
+            <textarea id="i_detail" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn solid">Log it</button>
+          <button type="button" class="btn ghost" id="cancelIv">Cancel</button>
+          <span class="muted" id="ivMsg"></span>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <!-- ============ 6. VIDEO + 9. AI SUMMARY ============ -->
+  <div class="sec-split">
+    <section class="panel">
+      <h2>Video evidence</h2>
+      <p class="hint">Clips tied to sessions and detected changes.</p>
+      <div class="blocked">
+        <strong>Not wired up yet.</strong> Attaching clips to a specific pitch or change
+        needs a stable per-pitch clip address from AWRE, which hasn't been worked out.
+        Until then this links out to the video search.
+        <div style="margin-top:.9rem">
+          <a class="btn" href="{{ p.video_search_url }}" target="_blank">Open AWRE Video Search</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>AI summary</h2>
+      <p class="hint">
+        Written from the changes and goals the database already computed &mdash; not from
+        the raw data &mdash; and cached until this player&rsquo;s data moves.
+      </p>
+      <div id="sumBox">
+        {% if p.ai_summary and p.ai_summary.summary %}
+          <p style="font-size:.92rem;line-height:1.7">{{ p.ai_summary.summary }}</p>
+          <div class="prog-note muted" style="margin-top:.7rem">
+            Written {{ p.ai_summary.created_at[:16] }}
+            {%- if p.ai_summary.model %} by {{ p.ai_summary.model }}{% endif %}
+            &middot; still current for this player&rsquo;s data
+          </div>
+        {% else %}
+          <p class="empty" style="padding:0">
+            No summary written yet. The weekly job writes one for every player whose data
+            moved that week; you can also write one now.
+          </p>
+        {% endif %}
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost" id="sumBtn"
+          {% if not writes_enabled %}disabled{% endif %}>
+          {% if p.ai_summary and p.ai_summary.summary %}Rewrite{% else %}Write one now{% endif %}
+        </button>
+        <span class="muted" id="sumMsg"></span>
+      </div>
+    </section>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PLAYER_ID = {{ p.player.id }};
+
+function toggle(btnId, formId, cancelId){
+  const btn = document.getElementById(btnId), form = document.getElementById(formId);
+  if(!btn) return;
+  btn.addEventListener('click', () => {
+    form.style.display = 'block'; btn.style.display = 'none';
+    const first = form.querySelector('input,select,textarea'); if(first) first.focus();
+  });
+  document.getElementById(cancelId).addEventListener('click', () => {
+    form.style.display = 'none'; btn.style.display = '';
+  });
+}
+toggle('showGoal', 'goalForm', 'cancelGoal');
+toggle('showIv', 'ivForm', 'cancelIv');
+
+const val = id => (document.getElementById(id).value || '').trim();
+
+async function post(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+                             body: JSON.stringify(body || {})});
+  const d = await r.json().catch(() => ({}));
+  return {ok: r.ok, data: d};
+}
+
+/* picking a metric pre-selects the direction its polarity implies --
+   'increase' on time-to-contact would be setting a goal to get slower */
+const gMetric = document.getElementById('g_metric');
+if(gMetric) gMetric.addEventListener('change', () => {
+  const opt = gMetric.selectedOptions[0];
+  if(opt && opt.dataset.dir) document.getElementById('g_direction').value = opt.dataset.dir;
+});
+
+const goalForm = document.getElementById('goalForm');
+if(goalForm) goalForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('goalMsg');
+  msg.textContent = 'Saving…';
+  const {ok, data} = await post('/api/goals', {
+    player_id: PLAYER_ID, title: val('g_title'), metric_key: val('g_metric'),
+    direction: val('g_direction'), target_value: val('g_target'),
+    set_by: val('g_by'), review_on: val('g_review'), detail: val('g_detail'),
+  });
+  if(!ok){ msg.textContent = data.error || 'Could not save.'; return; }
+  msg.textContent = 'Saved.'; location.reload();
+});
+
+const ivForm = document.getElementById('ivForm');
+if(ivForm) ivForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('ivMsg');
+  msg.textContent = 'Saving…';
+  const {ok, data} = await post('/api/interventions', {
+    player_id: PLAYER_ID, title: val('i_title'),
+    intervention_date: val('i_date'), category: val('i_category'),
+    goal_id: val('i_goal'), coach: val('i_coach'),
+    review_on: val('i_review'), detail: val('i_detail'),
+  });
+  if(!ok){ msg.textContent = data.error || 'Could not save.'; return; }
+  msg.textContent = 'Saved.'; location.reload();
+});
+
+document.querySelectorAll('.goalStatus').forEach(b => b.addEventListener('click', async () => {
+  b.disabled = true;
+  const {ok, data} = await post(`/api/goals/${b.dataset.goal}`, {status: b.dataset.status});
+  if(ok) location.reload();
+  else { b.disabled = false; alert(data.error || 'Could not update.'); }
+}));
+
+const sumBtn = document.getElementById('sumBtn');
+if(sumBtn) sumBtn.addEventListener('click', async () => {
+  const msg = document.getElementById('sumMsg');
+  sumBtn.disabled = true; msg.textContent = 'Writing…';
+  const {ok, data} = await post(`/api/players/${PLAYER_ID}/summary`, {force: true});
+  if(!ok){ msg.textContent = data.error || 'Could not write a summary.';
+           sumBtn.disabled = false; return; }
+  if(data.skipped){ msg.textContent = data.skipped; sumBtn.disabled = false; return; }
+  document.getElementById('sumBox').innerHTML =
+    '<p style="font-size:.92rem;line-height:1.7"></p>';
+  document.querySelector('#sumBox p').textContent = data.summary;
+  msg.textContent = data.cached ? 'Already current.' : 'Written.';
+  sumBtn.disabled = false;
+});
+
+document.querySelectorAll('.ivEval').forEach(b => b.addEventListener('click', async () => {
+  b.disabled = true; b.textContent = 'Checking…';
+  const {ok, data} = await post(`/api/interventions/${b.dataset.iv}/evaluate`);
+  if(ok) location.reload();
+  else { b.disabled = false; b.textContent = 'Re-check';
+         alert(data.error || 'Could not evaluate.'); }
+}));
+</script>
+{% endblock %}

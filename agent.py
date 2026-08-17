@@ -303,6 +303,239 @@ def tool_hittrax(batter=None):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Player-development tools  (spec section 9.1)
+# ---------------------------------------------------------------------------
+#
+# These are deliberately THIN. The analysis already happened in profiles.py,
+# changes.py and development.py; all these do is resolve a name and shape the
+# result down to what the model needs. None of them returns a raw swing or
+# pitch row -- that is the rule from roadmap section 9, enforced in code rather
+# than left to the model's judgement.
+
+def _engine():
+    import db
+    return db.get_engine()
+
+
+def _resolve(name):
+    """Name -> player row, via canonical names and every stored alias.
+
+    Returns (row, None) or (None, error_dict). The error carries the roster so
+    the model can pick the closest name instead of guessing or giving up.
+    """
+    import db
+    from sqlalchemy import select
+    engine = _engine()
+    key = str(name or "").strip().lower()
+    if not key:
+        return None, {"error": "no name given"}
+    with engine.connect() as conn:
+        people = conn.execute(
+            select(db.players.c.id, db.players.c.slug, db.players.c.first_name,
+                   db.players.c.last_name, db.players.c.is_pitcher,
+                   db.players.c.bats, db.players.c.throws,
+                   db.players.c.class_year)
+            .where(db.players.c.is_active == True)).all()  # noqa: E712
+        aliases = {str(r.alias).lower(): r.player_id for r in conn.execute(
+            select(db.player_aliases.c.alias, db.player_aliases.c.player_id))}
+
+    by_id = {r.id: r for r in people}
+    for r in people:
+        if f"{r.first_name} {r.last_name}".lower() == key:
+            return r, None
+    if key in aliases and aliases[key] in by_id:
+        return by_id[aliases[key]], None
+    hits = [r for r in people
+            if key in f"{r.first_name} {r.last_name}".lower()]
+    if len(hits) == 1:
+        return hits[0], None
+    if len(hits) > 1:
+        return None, {"error": f"'{name}' matches more than one player",
+                      "candidates": [f"{r.first_name} {r.last_name}" for r in hits]}
+    return None, {"error": f"no Moeller player matching '{name}'",
+                  "roster": sorted(f"{r.first_name} {r.last_name}" for r in people)}
+
+
+def tool_find_player(name):
+    row, err = _resolve(name)
+    if err:
+        return err
+    return {"player_id": row.id, "name": f"{row.first_name} {row.last_name}",
+            "role": "pitcher" if row.is_pitcher else "position player",
+            "class_year": row.class_year, "bats": row.bats, "throws": row.throws}
+
+
+def tool_player_snapshot(player):
+    import profiles
+    row, err = _resolve(player)
+    if err:
+        return err
+    prof = profiles.profile(_engine(), row.slug)
+    return {
+        "player": prof["player"]["name"],
+        "role": "pitcher" if prof["player"]["is_pitcher"] else "position player",
+        "last_session": prof["last_session"],
+        "training_sessions": len(prof["training"]),
+        "current_status": [
+            {"metric": t["label"], "value": f"{t['value']}{t['unit']}",
+             "baseline": t["baseline"], "delta": t["delta"],
+             "favorable": t["favorable"], "observations": t["n"],
+             "as_of": t["date"]} for t in prof["status"]],
+        "unacknowledged_changes": len([c for c in prof["changes"]
+                                       if not c["acknowledged"]]),
+        "active_goals": len([g for g in prof["goals"] if g["status"] == "active"]),
+        "note": ("No device training data yet -- this player's numbers below are "
+                 "game data only." if not prof["training"] else None),
+    }
+
+
+def tool_what_changed(player, only_unacknowledged=True):
+    import profiles
+    row, err = _resolve(player)
+    if err:
+        return err
+    prof = profiles.profile(_engine(), row.slug)
+    items = prof["changes"]
+    if only_unacknowledged:
+        items = [c for c in items if not c["acknowledged"]]
+    if not items:
+        return {"player": prof["player"]["name"], "changes": [],
+                "note": ("Nothing has cleared the detection thresholds for this player. "
+                         "That is not a tool failure and does not mean he isn't improving "
+                         "— detection needs enough sessions in both a recent and a "
+                         "baseline window, and stays quiet rather than reporting noise.")}
+    return {"player": prof["player"]["name"],
+            "changes": [{"summary": c["summary"], "severity": c["severity"],
+                         "favorable": c["favorable"], "detected_on": c["detected_on"],
+                         "effect_size": c["effect_size"],
+                         "observations": f"{c['n_recent']} recent vs {c['n_baseline']} baseline"}
+                        for c in items[:10]]}
+
+
+def tool_metric_history(player, metric_key):
+    """Session-level means. A pitcher with 900 tracked pitches over 12 sessions
+    returns 12 rows here, not 900."""
+    import metrics as M
+    import profiles
+    row, err = _resolve(player)
+    if err:
+        return err
+    if not M.known(metric_key):
+        return {"error": f"'{metric_key}' is not a tracked metric",
+                "available": sorted(M.REGISTRY)}
+    m = M.get(metric_key)
+    series = profiles.metric_series(_engine(), row.id, metric_key)
+    if not series:
+        return {"player": f"{row.first_name} {row.last_name}", "metric": m.label,
+                "sessions": [], "note": "no sessions with this metric"}
+    return {"player": f"{row.first_name} {row.last_name}",
+            "metric": m.label, "unit": m.unit,
+            "higher_is_better": m.polarity,
+            "target_band": list(m.target_band) if m.target_band else None,
+            "sessions": series[-20:]}
+
+
+def tool_compare_windows(player, metric_key, recent_sessions=3, baseline_days=120):
+    """An arbitrary two-window comparison, computed in SQL and arithmetic --
+    not by the model doing statistics in its head."""
+    import changes as C
+    import metrics as M
+    row, err = _resolve(player)
+    if err:
+        return err
+    if not M.known(metric_key):
+        return {"error": f"'{metric_key}' is not a tracked metric",
+                "available": sorted(M.REGISTRY)}
+    engine = _engine()
+    with engine.connect() as conn:
+        obs = C._observations(conn, row.id)
+        baseline_ids = C._baseline_sessions(conn, row.id)
+    if metric_key not in obs:
+        return {"player": f"{row.first_name} {row.last_name}",
+                "note": f"no {metric_key} data for this player"}
+    v = C.evaluate_metric(obs[metric_key], M.get(metric_key), baseline_ids,
+                          k=int(recent_sessions), baseline_days=int(baseline_days))
+    v.pop("gates", None)
+    v["player"] = f"{row.first_name} {row.last_name}"
+    return v
+
+
+def tool_goals_and_interventions(player):
+    import profiles
+    row, err = _resolve(player)
+    if err:
+        return err
+    prof = profiles.profile(_engine(), row.slug)
+    return {
+        "player": prof["player"]["name"],
+        "goals": [{"title": g["title"], "status": g["status"],
+                   "metric": g["metric_label"], "target": g["target_value"],
+                   "progress": g["progress"].get("state"),
+                   "current": g["progress"].get("current"),
+                   "pct_of_the_way": g["progress"].get("pct"),
+                   "set_by": g["set_by"], "review_on": g["review_on"]}
+                  for g in prof["goals"]][:10],
+        "interventions": [{"title": i["title"], "date": i["date"],
+                           "category": i["category"], "coach": i["coach"],
+                           "outcome": i["outcome"],
+                           "before_after": [
+                               f"{m['label']} {m['pre_mean']}->{m['post_mean']}{m['unit']} "
+                               f"({'moved' if m['moved'] else 'within noise'})"
+                               for m in (i.get("evaluation") or [])[:3]]}
+                          for i in prof["interventions"]][:10],
+        "note": ("An intervention's before/after is a comparison, not proof of a cause. "
+                 "Note the timing if it's relevant; don't claim it worked."),
+    }
+
+
+def tool_roster_alerts():
+    import profiles
+    ov = profiles.team_overview(_engine())
+    return {
+        "counts": ov["counts"],
+        "changes_needing_review": [
+            {"player": c["player"], "summary": c["summary"],
+             "severity": c["severity"], "favorable": c["favorable"],
+             "detected_on": c["detected_on"]} for c in ov["changes"][:20]],
+        "note": ("Empty means nothing has cleared the detection thresholds -- not "
+                 "that nothing is happening." if not ov["changes"] else None),
+    }
+
+
+def tool_protocol_status():
+    import development
+    import profiles
+    engine = _engine()
+    ov = profiles.team_overview(engine)
+    due = development.due_for_review(engine)
+    return {
+        "players_with_no_training_data": [p["name"] for p in ov["no_data"]][:40],
+        "players_without_a_baseline_session": [p["name"] for p in ov["no_baseline"]][:40],
+        "names_awaiting_review": ov["counts"]["open_reviews"],
+        "goals_due_for_review": [f"{g['player']}: {g['title']} (due {g['review_on']})"
+                                 for g in due["goals"]][:20],
+        "interventions_due_for_review": [
+            f"{i['player']}: {i['title']} (due {i['review_on']})"
+            for i in due["interventions"]][:20],
+    }
+
+
+def tool_player_summary(player):
+    """The cached development note, if one is current. Never generates one --
+    that would put an API call inside an API call."""
+    import summaries
+    row, err = _resolve(player)
+    if err:
+        return err
+    hit = summaries.cached(_engine(), row.id)
+    if not hit:
+        return {"player": f"{row.first_name} {row.last_name}", "summary": None,
+                "note": "no current cached summary; the weekly job writes these"}
+    return {"player": f"{row.first_name} {row.last_name}",
+            "summary": hit["summary"], "written": hit["created_at"]}
+
+
 def tool_team_stats(kind):
     paths = {"batting": "/api/gcl/batting", "pitching": "/api/gcl/pitching",
              "games": "/api/gcl/games", "record": "/api/config"}
@@ -319,12 +552,23 @@ def tool_team_stats(kind):
 
 
 TOOL_IMPLS = {
+    # game-performance layer (unchanged -- these already worked)
     "list_players": tool_list_players,
     "charting_report": tool_charting_report,
     "season_pitching": tool_season_pitching,
     "season_batting": tool_season_batting,
     "hittrax": tool_hittrax,
     "team_stats": tool_team_stats,
+    # player-development layer (spec section 9.1)
+    "find_player": tool_find_player,
+    "player_snapshot": tool_player_snapshot,
+    "what_changed": tool_what_changed,
+    "metric_history": tool_metric_history,
+    "compare_windows": tool_compare_windows,
+    "goals_and_interventions": tool_goals_and_interventions,
+    "roster_alerts": tool_roster_alerts,
+    "protocol_status": tool_protocol_status,
+    "player_summary": tool_player_summary,
 }
 
 TOOLS = [
@@ -415,28 +659,181 @@ TOOLS = [
             "required": ["kind"],
         },
     },
+
+    # --- player development (spec 9.1) -----------------------------------
+    {
+        "name": "find_player",
+        "description": ("Resolve a player's name to his Moeller Player ID and basics "
+                        "(role, class, bats/throws). Call this first when a question is "
+                        "about one player and you're unsure of the exact name -- it matches "
+                        "nicknames and alternate spellings, and returns the roster on a miss."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "player_snapshot",
+        "description": ("Where a player stands right now: his headline training metrics with "
+                        "each one's baseline and delta, when he was last measured, how many "
+                        "sessions he has, and counts of open changes and goals. Call this for "
+                        "'how is X doing' or 'what do I need to know about X'."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"player": {"type": "string"}},
+            "required": ["player"],
+        },
+    },
+    {
+        "name": "what_changed",
+        "description": ("Meaningful changes detected for a player against HIS OWN prior "
+                        "baseline -- not against the team. Each one is already checked "
+                        "against measurement noise, the player's own variability, and a "
+                        "significance test, so anything returned here is worth a coach's "
+                        "attention. Call this for 'what changed with X' or 'is X trending "
+                        "up'. An empty list means nothing cleared the thresholds."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string"},
+                "only_unacknowledged": {
+                    "type": "boolean",
+                    "description": "Default true. Set false to include changes a coach has already cleared."},
+            },
+            "required": ["player"],
+        },
+    },
+    {
+        "name": "metric_history",
+        "description": ("One metric for one player over time, as SESSION AVERAGES -- one row "
+                        "per session, never individual pitches or swings. Call this when a "
+                        "coach wants the trend rather than a single comparison. Metric keys "
+                        "are things like fb_velocity, spin_rate, bat_speed, exit_velocity, "
+                        "attack_angle; a wrong key returns the full list."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string"},
+                "metric_key": {"type": "string"},
+            },
+            "required": ["player", "metric_key"],
+        },
+    },
+    {
+        "name": "compare_windows",
+        "description": ("Compare a player's recent sessions against his earlier baseline for "
+                        "one metric, with the window sizes you choose. The comparison is "
+                        "computed in the database -- means, standard deviations, effect size "
+                        "and a significance test all come back done. Use this when the coach "
+                        "asks about a different span than the default (e.g. 'last five "
+                        "bullpens' or 'since the spring')."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string"},
+                "metric_key": {"type": "string"},
+                "recent_sessions": {"type": "integer", "description": "Sessions in the recent window; default 3"},
+                "baseline_days": {"type": "integer", "description": "Days of history for the baseline; default 120"},
+            },
+            "required": ["player", "metric_key"],
+        },
+    },
+    {
+        "name": "goals_and_interventions",
+        "description": ("A player's development goals with progress toward each target, and "
+                        "the interventions logged for him (grip changes, drills, swing "
+                        "changes, cues, strength blocks) with a before/after on each. Call "
+                        "this for 'what are we working on with X' or 'did the grip change "
+                        "work'. Report before/after as a comparison; never claim the "
+                        "intervention caused the change."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"player": {"type": "string"}},
+            "required": ["player"],
+        },
+    },
+    {
+        "name": "roster_alerts",
+        "description": ("Changes across the whole roster that a coach hasn't cleared yet, most "
+                        "recent first, plus overall counts. Call this for 'who needs "
+                        "attention', 'anything I should know about this week', or any "
+                        "team-wide development question."),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "protocol_status",
+        "description": ("Where data collection has gaps: players with no training data, "
+                        "players missing a baseline session, export names still awaiting "
+                        "review, and goals or interventions past their review date. Call this "
+                        "for 'who are we missing data on' or 'are we keeping up with the "
+                        "protocols'."),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "player_summary",
+        "description": ("The stored written development note for a player, if one is current. "
+                        "Useful as background before answering a broader question. It may be "
+                        "absent -- that is not an error, just means no note has been written "
+                        "since his data last changed."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"player": {"type": "string"}},
+            "required": ["player"],
+        },
+    },
 ]
 
-SYSTEM = """You are the Coach Assistant on the Moeller Baseball Analytics hub, answering questions \
-for Archbishop Moeller High School coaches.
+SYSTEM = """You are the Player Development Assistant on the Moeller Baseball Analytics hub, \
+answering questions for Archbishop Moeller High School coaches.
 
-You have tools over three real data sources:
-- The Charting App: off-season bullpens and live at-bats being charted right now (live database).
-- Season pitch data: 19,560 tracked pitches from the 2024, 2025 and 2026 seasons (AWRE/GoRout).
-- Team Stats: the official 2026 season record, box-score batting/pitching stats, and game log.
-- HitTrax: cage batted-ball data (exit velo, launch angle, distance) — refreshed weekly. This \
-may not be loaded yet; if the tool says so, tell the coach HitTrax data hasn't been uploaded yet.
+Your job is development, not just lookup: what changed for a player, what the evidence is, \
+and what a coach might want to look at next.
 
-Ground rules:
-- Answer from tool results, never from memory. If a tool returns an error or empty data, say what's \
-missing rather than guessing. Never invent numbers.
-- If a player lookup misses, check list_players and use the closest name.
-- The 2026 season is complete; charting data is current off-season work.
-- Be concise and concrete: lead with the answer and the key numbers. A couple of short paragraphs \
-or a few plain lines is the right size. You're talking to coaches — baseball shorthand is fine.
-- Plain text ONLY. The chat window renders your reply literally, so never use markdown: no **bold**, \
-no ## headers, no tables, no bullet asterisks. Dashes and line breaks are fine.
-- Whiff% means swinging strikes over swings. Attack zones: Heart (middle), Shadow (edges), Chase, Waste.
+TWO LAYERS OF DATA
+
+Player development — training sessions, detected changes, goals and interventions:
+- find_player, player_snapshot, what_changed, metric_history, compare_windows,
+  goals_and_interventions, roster_alerts, protocol_status, player_summary.
+- These read a connected history of Blast / HitTrax / Rapsodo sessions per player.
+- This data is NEW and may be thin or empty. That is expected, not an error.
+
+Game performance — how it actually played out in competition:
+- season_pitching / season_batting (19,560 tracked AWRE pitches, 2024-2026),
+  team_stats (official 2026 record and box score), charting_report (off-season
+  bullpens and live ABs), hittrax (cage batted-ball data), list_players.
+
+HOW TO WORK
+
+- For a question about one player, start with find_player, then player_snapshot and/or
+  what_changed. Add game data when the question is about competition results.
+- Prefer what_changed and compare_windows over eyeballing metric_history yourself. The
+  comparison is already computed — means, effect size and significance come back done.
+  Do not do statistics in your head or recompute what a tool already gave you.
+- For team-wide questions use roster_alerts; for collection gaps use protocol_status.
+
+WHAT NOT TO DO
+
+- Never invent a number. Answer only from tool results. If a tool returns empty or an
+  error, say what is missing.
+- An empty change list means nothing cleared the detection thresholds — it does NOT mean
+  the player is not improving, and it is not a tool failure. Say so plainly.
+- A change is a comparison against the player's own baseline, never proof of a cause. If
+  an intervention was logged near a change you may note the timing; do not say it caused it.
+- "Up" is not the same as "good". The tools tell you whether a move is favorable — some
+  metrics are lower-is-better and some have a target band. Trust the favorable flag over
+  the sign of the number.
+- Coaches own the interpretation and the development decision. Offer evidence and things
+  worth checking, not verdicts on a player.
+
+STYLE
+
+- Lead with the answer and the key numbers. A couple of short paragraphs or a few plain
+  lines is right. You're talking to coaches — baseball shorthand is fine.
+- Plain text ONLY. The chat window renders your reply literally, so never use markdown:
+  no **bold**, no ## headers, no tables, no bullet asterisks. Dashes and line breaks are fine.
+- Whiff% means swinging strikes over swings. Attack zones: Heart (middle), Shadow (edges),
+  Chase, Waste. The 2026 season is complete; charting data is current off-season work.
 - Only baseball and Moeller-data questions; politely decline anything else."""
 
 

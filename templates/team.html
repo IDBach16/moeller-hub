@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Team Development — Moeller Baseball Analytics{% endblock %}
+
+{% block head %}
+<style>
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.9rem;
+  margin-bottom:1.5rem}
+.stat{background:rgba(15,15,30,.5);border:1px solid var(--glass-border);
+  border-radius:11px;padding:1rem}
+.stat .n{font-size:1.7rem;font-weight:800;line-height:1}
+.stat .l{font-size:.7rem;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--gold);margin-top:.4rem}
+.chg{display:flex;gap:.8rem;align-items:flex-start;padding:.7rem 0;
+  border-bottom:1px solid rgba(255,255,255,.06)}
+.chg:last-child{border-bottom:none}
+.chg .dot{width:8px;height:8px;border-radius:50%;margin-top:.45rem;flex-shrink:0}
+.chg .dot.good{background:#8fd9a4}
+.chg .dot.bad{background:#e79a9a}
+.chg .dot.flat{background:rgba(255,255,255,.3)}
+.chg a{color:var(--white);text-decoration:none;font-weight:600;font-size:.9rem}
+.chg a:hover{color:var(--gold)}
+.chg .why{font-size:.8rem;color:rgba(255,255,255,.45);line-height:1.5;margin-top:.15rem}
+.namelist{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem}
+.namelist a{
+  padding:.3rem .7rem;border:1px solid var(--glass-border);border-radius:999px;
+  font-size:.78rem;color:rgba(255,255,255,.6);text-decoration:none;
+}
+.namelist a:hover{border-color:var(--gold);color:var(--gold)}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+  <div class="page-head"><h1>Team Development</h1></div>
+  <p class="page-sub">
+    Roster-wide development: what moved, who needs attention, and where the collection
+    protocols have gaps.
+  </p>
+
+  <div class="stats">
+    <div class="stat"><div class="n">{{ o.counts.players }}</div><div class="l">Players</div></div>
+    <div class="stat"><div class="n">{{ o.counts.sessions }}</div><div class="l">Sessions</div></div>
+    <div class="stat"><div class="n">{{ '{:,}'.format(o.counts.measurements) }}</div><div class="l">Measurements</div></div>
+    <div class="stat"><div class="n">{{ o.counts.active_goals }}</div><div class="l">Active goals</div></div>
+    <div class="stat"><div class="n">{{ o.counts.open_reviews }}</div><div class="l">Names to review</div></div>
+  </div>
+
+  <section class="panel">
+    <h2>Recent changes across the roster</h2>
+    <p class="hint">
+      Each player compared against his own baseline. Acknowledging one clears it from
+      this feed; it stays on the player&rsquo;s timeline as history.
+    </p>
+    {% if o.changes %}
+      {% for c in o.changes %}
+      <div class="chg" data-event="{{ c.id }}">
+        <div class="dot {{ 'good' if c.favorable else ('bad' if c.favorable is false else 'flat') }}"></div>
+        <div style="flex:1">
+          <a href="/players/{{ c.slug }}">{{ c.player }}</a>
+          <span class="pill {{ 'ok' if c.severity == 'significant' else 'pending' }}">{{ c.severity }}</span>
+          <div class="why">{{ c.summary }} &middot; {{ c.detected_on }}</div>
+        </div>
+        <button class="btn ghost ackBtn" data-event="{{ c.id }}"
+          {% if not writes_enabled %}disabled{% endif %}>Got it</button>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="empty">
+        Nothing detected yet. Change detection compares a recent window against a
+        baseline window and stays silent until both have enough data &mdash; it would
+        rather say nothing than report noise.
+      </p>
+    {% endif %}
+    <div class="btn-row">
+      <button class="btn" id="detectBtn" {% if not writes_enabled %}disabled{% endif %}>
+        Run detection now</button>
+      <span class="muted" id="detectMsg"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Protocol compliance</h2>
+    <p class="hint">
+      From the roadmap's collection protocols: a baseline session is what every later
+      session gets measured against, so a player without one can't be tracked over time.
+    </p>
+
+    {% if o.no_data %}
+    <p style="font-size:.87rem;margin-bottom:.3rem">
+      <strong>{{ o.no_data|length }}</strong> player(s) with no training data at all
+    </p>
+    <div class="namelist">
+      {% for p in o.no_data %}<a href="/players/{{ p.slug }}">{{ p.name }}</a>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if o.no_baseline and o.counts.sessions %}
+    <p style="font-size:.87rem;margin:1.2rem 0 .3rem">
+      <strong>{{ o.no_baseline|length }}</strong> player(s) without a baseline session
+    </p>
+    <div class="namelist">
+      {% for p in o.no_baseline %}<a href="/players/{{ p.slug }}">{{ p.name }}</a>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not o.no_data and not o.no_baseline %}
+      <p class="empty">Every player has a baseline and recent data.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.ackBtn').forEach(b => b.addEventListener('click', async () => {
+  b.disabled = true;
+  const r = await fetch(`/api/changes/${b.dataset.event}/acknowledge`, {method:'POST'});
+  const row = document.querySelector(`.chg[data-event="${b.dataset.event}"]`);
+  if(r.ok){ if(row){ row.style.opacity = '.3'; } b.textContent = 'Cleared'; }
+  else { b.disabled = false; const d = await r.json().catch(()=>({}));
+         alert(d.error || 'Could not acknowledge.'); }
+}));
+
+const det = document.getElementById('detectBtn'), msg = document.getElementById('detectMsg');
+if(det) det.addEventListener('click', async () => {
+  det.disabled = true; msg.textContent = 'Comparing every player against his baseline…';
+  const r = await fetch('/api/changes/detect', {method:'POST'});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ msg.textContent = d.error || 'Detection failed.'; det.disabled = false; return; }
+  msg.textContent = `${d.fired} change(s) found across ${d.metrics_examined} metrics.`;
+  if(d.fired) setTimeout(() => location.reload(), 1400);
+  else det.disabled = false;
+});
+</script>
+{% endblock %}
