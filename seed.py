@@ -29,6 +29,7 @@ Usage:
 """
 
 import difflib
+import os
 import sys
 
 import requests as rq
@@ -330,6 +331,69 @@ def status(engine):
             n = conn.execute(select(func.count()).select_from(table)).scalar()
             print(f"    {name:<20} {n}")
     print()
+
+
+# ---------------------------------------------------------------------------
+# Seed-on-startup
+# ---------------------------------------------------------------------------
+#
+# Without this, a fresh deploy comes up with an empty roster and every
+# player-centred page is a dead end until someone remembers to run this file by
+# hand. So the app seeds itself once, on boot, when the database is empty.
+#
+# Three deliberate constraints:
+#
+#   * It only runs when `players` is EMPTY. After that it is one cheap COUNT
+#     and an immediate return, so restarts cost nothing and nothing a coach
+#     later edits gets overwritten.
+#
+#   * It touches no network. Only the bundled season CSV and the Blast tables
+#     built into this file -- so a slow or dead Charting App can never hang
+#     startup. The Charting roster stays a manual `python seed.py` (it holds two
+#     rows named TEST TEST today, so there is nothing to gain by rushing it).
+#
+#   * It is OFF outside production by default, so the test suites build their
+#     own fixtures without 25 real players appearing underneath them. Set
+#     AUTO_SEED=1 to force it locally, AUTO_SEED=0 to disable it in production.
+
+def autoseed_enabled():
+    flag = os.environ.get("AUTO_SEED", "").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return False
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    return bool(os.environ.get("RAILWAY_ENVIRONMENT"))
+
+
+def maybe_seed(engine, year=DEFAULT_SEASON):
+    """Seed the roster if this database has never been seeded. Idempotent.
+
+    Never raises: a hub that starts with an empty roster is a bad day, but a hub
+    that refuses to start at all is a worse one.
+    """
+    if not autoseed_enabled():
+        return {"ran": False, "reason": "auto-seed disabled outside production"}
+    try:
+        with engine.connect() as conn:
+            existing = conn.execute(select(func.count())
+                                    .select_from(db.players)).scalar()
+        if existing:
+            return {"ran": False, "reason": f"{existing} players already seeded"}
+
+        players_added = seed_roster_from_season(engine, year=year)
+        linked, flagged = seed_blast_vendor_ids(engine)
+        columns = seed_blast_column_maps(engine)
+        result = {"ran": True, "players": players_added, "blast_linked": linked,
+                  "names_queued": flagged, "blast_columns": columns}
+        print(f"[seed] first run: {players_added} players from the {year} season, "
+              f"{linked} Blast IDs linked, {flagged} names queued for review, "
+              f"{columns} Blast columns mapped", flush=True)
+        return result
+    except Exception as e:
+        # Most likely a duplicate-slug race if more than one worker boots at
+        # once. The unique constraint is what makes that harmless.
+        print(f"[seed] auto-seed skipped: {e}", flush=True)
+        return {"ran": False, "error": str(e)}
 
 
 def main(argv):

@@ -85,6 +85,16 @@ def create_app():
     app.secret_key = os.environ.get("SECRET_KEY", "moeller-hub-2027-secret")
     app.permanent_session_lifetime = timedelta(days=30)
 
+    # Build the schema and, on a genuinely empty database, seed the roster --
+    # otherwise a fresh deploy comes up with no players and every player page is
+    # a dead end. Guarded and idempotent; see seed.maybe_seed. Failure here must
+    # never stop the hub serving, so the tool cards still work regardless.
+    try:
+        import seed
+        seed.maybe_seed(db.get_engine())
+    except Exception as e:                                   # pragma: no cover
+        print(f"[startup] database not ready: {e}", flush=True)
+
     # -----------------------------------------------------------------------
     # Password gate
     # -----------------------------------------------------------------------
@@ -323,15 +333,29 @@ def create_app():
 
     @app.route("/api/health")
     def health():
-        out = {"ok": True, "gate": bool(HUB_PASSWORD)}
+        """First thing to check after a deploy. `backend` must say postgres --
+        sqlite in production means Railway will wipe the data on redeploy."""
+        import seed
+        from sqlalchemy import func, select
+        out = {"ok": True, "gate": bool(HUB_PASSWORD),
+               "writes_enabled": writes_enabled(),
+               "auto_seed": seed.autoseed_enabled()}
         try:
-            import db
-            from sqlalchemy import func, select
-            engine = db.get_engine()
+            engine = _engine()
             with engine.connect() as conn:
-                out["players"] = conn.execute(
-                    select(func.count()).select_from(db.players)).scalar()
+                for label, table in (("players", db.players),
+                                     ("sessions", db.sessions),
+                                     ("change_events", db.change_events)):
+                    out[label] = conn.execute(
+                        select(func.count()).select_from(table)).scalar()
             out["backend"] = "postgres" if db.is_postgres() else "sqlite"
+            if not out["players"]:
+                out["warning"] = ("no players seeded -- run `python seed.py`, "
+                                  "or set AUTO_SEED=1 and restart")
+            elif out["backend"] == "sqlite" and os.environ.get("RAILWAY_ENVIRONMENT"):
+                out["warning"] = ("running on SQLite in production -- Railway wipes "
+                                  "this on every redeploy. Add the Postgres plugin "
+                                  "so DATABASE_URL is set.")
         except Exception as e:
             out["ok"] = False
             out["db_error"] = str(e)

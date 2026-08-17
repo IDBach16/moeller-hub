@@ -149,6 +149,61 @@ check("/api/health ok", r.status_code == 200)
 h = r.get_json()
 check("health reports the db backend", h.get("backend") == "sqlite", str(h))
 check("health counts players", h.get("players") == 1, str(h))
+check("health reports whether writes are on", "writes_enabled" in h, str(h))
+
+
+print("\n5b. seed-on-startup")
+import seed  # noqa: E402
+
+# Off by default outside production -- otherwise every test suite would find 25
+# real players underneath its own fixtures.
+check("auto-seed is off in a plain environment", seed.autoseed_enabled() is False)
+res = seed.maybe_seed(engine)
+check("  and does nothing when disabled", res["ran"] is False and "disabled" in res["reason"])
+
+os.environ["RAILWAY_ENVIRONMENT"] = "production"
+try:
+    check("auto-seed turns on in production", seed.autoseed_enabled() is True)
+    # This database already has a player, so it must decline rather than re-seed.
+    res = seed.maybe_seed(engine)
+    check("  but refuses to touch a database that already has players",
+          res["ran"] is False and "already" in res["reason"], str(res))
+    os.environ["AUTO_SEED"] = "0"
+    check("  AUTO_SEED=0 overrides production", seed.autoseed_enabled() is False)
+finally:
+    os.environ.pop("AUTO_SEED", None)
+    os.environ.pop("RAILWAY_ENVIRONMENT", None)
+
+os.environ["AUTO_SEED"] = "1"
+try:
+    check("AUTO_SEED=1 forces it on locally", seed.autoseed_enabled() is True)
+finally:
+    os.environ.pop("AUTO_SEED", None)
+
+# It must seed a genuinely empty database, exactly once.
+import tempfile as _tf  # noqa: E402
+
+from sqlalchemy import create_engine as _ce  # noqa: E402
+fresh_path = os.path.join(_tf.mkdtemp(), "fresh.db")
+fresh = _ce("sqlite:///" + fresh_path.replace("\\", "/"), future=True)
+db.metadata.create_all(fresh)
+os.environ["AUTO_SEED"] = "1"
+try:
+    first = seed.maybe_seed(fresh)
+    check("an empty database gets seeded", first.get("ran") is True, str(first))
+    check("  with the real roster", first.get("players", 0) >= 20, str(first))
+    check("  Blast IDs linked", first.get("blast_linked", 0) > 0, str(first))
+    check("  and Blast columns mapped", first.get("blast_columns", 0) > 0, str(first))
+    second = seed.maybe_seed(fresh)
+    check("running it again is a no-op", second["ran"] is False, str(second))
+    from sqlalchemy import func as _f  # noqa: E402
+    from sqlalchemy import select as _s  # noqa: E402
+    with fresh.connect() as c:
+        n = c.execute(_s(_f.count()).select_from(db.players)).scalar()
+    check("  and did not duplicate anyone", n == first["players"], f"{n}")
+finally:
+    os.environ.pop("AUTO_SEED", None)
+    fresh.dispose()
 
 r = client.post("/api/git-push")
 check("git-push disabled while the gate is off", r.status_code == 403,
