@@ -184,6 +184,17 @@ def api_agent():
         return jsonify({"error": f"The assistant hit a snag: {e}"}), 500
 
 
+@app.route("/api/report-options")
+def api_report_options():
+    """Rosters and seasons for the Quick Reports pickers. Loaded on first use --
+    it parses the season CSV, so page loads don't pay for it."""
+    try:
+        import reports
+        return jsonify(reports.report_options())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ---------------------------------------------------------------------------
 # Git push endpoint
 # ---------------------------------------------------------------------------
@@ -517,7 +528,7 @@ body{
   <div class="ca-box">
     <div class="ca-msgs" id="caMsgs">
       <div class="ca-hint">
-        <p>Ask anything about Moeller baseball — season stats, pitchers, hitters, bullpens.</p>
+        <p>Ask anything about Moeller baseball — or tap a Quick Report below for a full write-up.</p>
         <div class="ca-chips">
           <span class="ca-chip">Who led the team in AVG in 2026?</span>
           <span class="ca-chip">What was Jack Ujvagi&rsquo;s best pitch?</span>
@@ -525,6 +536,30 @@ body{
         </div>
       </div>
     </div>
+
+    <!-- Quick Reports: pre-built templates over every data source -->
+    <div class="ca-reports">
+      <div class="ca-rep-row">
+        <span class="ca-rep-label">Quick Reports</span>
+        <button class="ca-rep" data-rep="hitter">Hitter</button>
+        <button class="ca-rep" data-rep="pitcher">Pitcher</button>
+        <button class="ca-rep" data-rep="bullpen">Bullpen</button>
+        <button class="ca-rep" data-rep="team">Team</button>
+        <button class="ca-rep" data-rep="compare">Compare</button>
+      </div>
+      <div class="ca-rep-form" id="caRepForm" hidden>
+        <select id="caRepRole" aria-label="Compare" hidden>
+          <option value="hitter">Hitters</option>
+          <option value="pitcher">Pitchers</option>
+        </select>
+        <select id="caRepPlayer" aria-label="Player"></select>
+        <select id="caRepPlayer2" aria-label="Second player" hidden></select>
+        <select id="caRepYear" aria-label="Season"></select>
+        <button id="caRepGo">Build Report</button>
+        <button id="caRepCancel" class="ca-rep-x" title="Cancel">&times;</button>
+      </div>
+    </div>
+
     <div class="ca-input">
       <input type="text" id="caText" placeholder="Ask about Moeller data…" maxlength="500"/>
       <button id="caSend">Ask</button>
@@ -654,11 +689,28 @@ body{
   box-shadow:0 16px 50px rgba(0,0,0,.35);
 }
 .ca-msgs{
-  min-height:190px;max-height:460px;overflow-y:auto;padding:1.2rem;
+  min-height:190px;max-height:62vh;overflow-y:auto;padding:1.2rem;
   display:flex;flex-direction:column;gap:.6rem;
 }
 .ca-msg{max-width:85%;padding:.65rem .9rem;border-radius:12px;font-size:.9rem;
   line-height:1.55;white-space:pre-wrap;word-wrap:break-word}
+/* Reports come back as light markdown, so those bubbles lay out as blocks */
+.ca-rich{white-space:normal;max-width:96%}
+.ca-rich .ca-h{color:var(--gold);font-size:.82rem;letter-spacing:.08em;
+  text-transform:uppercase;margin:.9rem 0 .35rem;font-weight:700}
+.ca-rich .ca-h:first-child{margin-top:0}
+.ca-rich .ca-p{margin:.35rem 0}
+.ca-rich .ca-ul{margin:.35rem 0 .35rem 1.05rem;padding:0}
+.ca-rich .ca-ul li{margin:.2rem 0}
+.ca-rich .ca-hr{border:none;border-top:1px solid var(--glass-border);margin:.8rem 0}
+.ca-rich strong{color:var(--gold-light,#e8d9a8)}
+.ca-acts{display:flex;gap:.4rem;align-self:flex-start;margin:-.2rem 0 .2rem}
+.ca-acts button{
+  background:none;border:1px solid var(--glass-border);border-radius:999px;
+  color:rgba(255,255,255,.6);font-family:inherit;font-size:.7rem;letter-spacing:.05em;
+  text-transform:uppercase;padding:.25rem .7rem;cursor:pointer;transition:all .2s;
+}
+.ca-acts button:hover{color:var(--gold);border-color:var(--gold)}
 .ca-user{align-self:flex-end;background:var(--gold-dim);border:1px solid var(--glass-border);
   border-bottom-right-radius:4px}
 .ca-bot{align-self:flex-start;background:rgba(26,26,46,.8);border:1px solid rgba(255,255,255,.08);
@@ -675,6 +727,36 @@ body{
 .ca-typing{align-self:flex-start;color:var(--gold);font-size:1.1rem;letter-spacing:.2em;
   animation:caPulse 1.2s ease-in-out infinite}
 @keyframes caPulse{0%,100%{opacity:.35}50%{opacity:1}}
+/* --- Quick Reports strip --- */
+.ca-reports{border-top:1px solid var(--glass-border);padding:.7rem .8rem .1rem}
+.ca-rep-row{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem}
+.ca-rep-label{color:rgba(255,255,255,.45);font-size:.7rem;letter-spacing:.12em;
+  text-transform:uppercase;margin-right:.3rem}
+.ca-rep{
+  padding:.4rem .85rem;border:1px solid var(--glass-border);border-radius:999px;
+  background:none;color:var(--gold);font-family:inherit;font-size:.78rem;
+  cursor:pointer;transition:all .2s;-webkit-tap-highlight-color:transparent;
+}
+.ca-rep:hover,.ca-rep.on{background:var(--gold-dim);border-color:var(--gold)}
+.ca-rep-form{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;padding:.6rem 0 .5rem}
+.ca-rep-form select{
+  flex:1 1 150px;min-width:0;padding:.5rem .6rem;background:rgba(15,15,30,.9);
+  border:1px solid var(--glass-border);border-radius:8px;color:var(--white);
+  font-family:inherit;font-size:.85rem;outline:none;
+}
+.ca-rep-form select:focus{border-color:var(--gold)}
+.ca-rep-form #caRepGo{
+  padding:.5rem 1rem;border:none;border-radius:8px;cursor:pointer;
+  background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy);
+  font-family:inherit;font-weight:700;font-size:.75rem;letter-spacing:.06em;
+  text-transform:uppercase;
+}
+.ca-rep-form #caRepGo:disabled{opacity:.5;cursor:wait}
+.ca-rep-x{
+  background:none;border:none;color:rgba(255,255,255,.45);font-size:1.2rem;
+  line-height:1;cursor:pointer;padding:.2rem .4rem;
+}
+.ca-rep-x:hover{color:var(--gold)}
 .ca-input{
   display:flex;gap:.5rem;padding:.8rem;border-top:1px solid var(--glass-border);
 }
@@ -696,25 +778,178 @@ body{
 (function(){
   const msgs=document.getElementById('caMsgs'), input=document.getElementById('caText'),
         send=document.getElementById('caSend');
+  const repForm=document.getElementById('caRepForm'),
+        selRole=document.getElementById('caRepRole'),
+        selP=document.getElementById('caRepPlayer'),
+        selP2=document.getElementById('caRepPlayer2'),
+        selY=document.getElementById('caRepYear'),
+        repGo=document.getElementById('caRepGo'),
+        repCancel=document.getElementById('caRepCancel');
   const hist=[];
-  let busy=false;
+  let busy=false, opts=null, mode=null;
+
+  // ---- rendering -------------------------------------------------------
+  // Replies come back as a small markdown subset (## headers, **bold**, "- "
+  // bullets, ---). Escape first, then build the markup, so nothing in a reply
+  // can inject HTML.
+  function esc(s){
+    return String(s).replace(/[&<>"']/g,function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function inline(s){ return s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>'); }
+  function md(text){
+    const lines=esc(text).split(/\r?\n/);
+    let html='', list=false;
+    const closeList=function(){ if(list){ html+='</ul>'; list=false; } };
+    for(let i=0;i<lines.length;i++){
+      const line=lines[i].trim();
+      if(!line){ closeList(); continue; }
+      if(/^-{3,}$/.test(line)){ closeList(); html+='<hr class="ca-hr">'; continue; }
+      const h=line.match(/^#{1,4}\s+(.*)$/);
+      if(h){ closeList(); html+='<h4 class="ca-h">'+inline(h[1])+'</h4>'; continue; }
+      const b=line.match(/^[-*•]\s+(.*)$/);
+      if(b){ if(!list){ html+='<ul class="ca-ul">'; list=true; }
+             html+='<li>'+inline(b[1])+'</li>'; continue; }
+      closeList();
+      html+='<p class="ca-p">'+inline(line)+'</p>';
+    }
+    closeList();
+    return html;
+  }
 
   // tapping an example question asks it
   msgs.addEventListener('click',e=>{
     const chip=e.target.closest('.ca-chip');
-    if(chip){input.value=chip.textContent;ask();}
+    if(chip){ ask(chip.textContent); return; }
+    const act=e.target.closest('.ca-acts button');
+    if(act){
+      const text=act.parentElement.dataset.text||'';
+      if(act.dataset.act==='copy'){
+        const done=function(){ act.textContent='Copied'; setTimeout(function(){act.textContent='Copy';},1500); };
+        if(navigator.clipboard&&navigator.clipboard.writeText){
+          navigator.clipboard.writeText(text).then(done,function(){});
+        }
+      } else { printReport(text); }
+    }
   });
 
-  function bubble(cls,text){
-    const hint=msgs.querySelector('.ca-hint'); if(hint)hint.remove();
-    const el=document.createElement('div'); el.className='ca-msg '+cls; el.textContent=text;
-    msgs.appendChild(el); msgs.scrollTop=msgs.scrollHeight; return el;
+  function printReport(text){
+    const w=window.open('','_blank','width=820,height=950');
+    if(!w){ alert('Allow pop-ups to print the report.'); return; }
+    const css='body { font-family:Georgia,serif; color:#111; max-width:44rem; margin:2.5rem auto; padding:0 1.5rem; line-height:1.55 } '+
+              'h4 { font-family:Helvetica,Arial,sans-serif; font-size:.78rem; letter-spacing:.09em; text-transform:uppercase; color:#8a6d1f; border-bottom:1px solid #ddd; padding-bottom:.25rem; margin:1.4rem 0 .5rem } '+
+              'p { margin:.4rem 0 } ul { margin:.4rem 0 .4rem 1.2rem } li { margin:.2rem 0 } '+
+              'hr { border:none; border-top:1px solid #ddd; margin:1rem 0 } '+
+              '.mast { font-family:Helvetica,Arial,sans-serif; font-size:.7rem; letter-spacing:.16em; text-transform:uppercase; color:#999; margin-bottom:1.4rem }';
+    w.document.write('<!doctype html><html><head><meta charset="utf-8">'+
+      '<title>Moeller Baseball Report</title><style>'+css+'</style></head><body>'+
+      '<div class="mast">Moeller Baseball Analytics &middot; Coach Assistant</div>'+
+      md(text)+'</body></html>');
+    w.document.close(); w.focus();
+    setTimeout(function(){ w.print(); },350);
   }
 
-  async function ask(){
-    const q=input.value.trim();
+  function bubble(cls,text,rich){
+    const hint=msgs.querySelector('.ca-hint'); if(hint)hint.remove();
+    const el=document.createElement('div'); el.className='ca-msg '+cls;
+    if(rich){ el.classList.add('ca-rich'); el.innerHTML=md(text); }
+    else { el.textContent=text; }
+    msgs.appendChild(el);
+    if(rich&&text.length>400){
+      const acts=document.createElement('div');
+      acts.className='ca-acts'; acts.dataset.text=text;
+      acts.innerHTML='<button data-act="copy">Copy</button><button data-act="print">Print</button>';
+      msgs.appendChild(acts);
+    }
+    msgs.scrollTop=msgs.scrollHeight; return el;
+  }
+
+  // ---- quick reports ---------------------------------------------------
+  async function loadOptions(){
+    if(opts)return opts;
+    const r=await fetch('/api/report-options');
+    opts=await r.json();
+    selY.innerHTML='<option value="">All seasons</option>'+
+      (opts.years||[]).map(function(y){ return '<option value="'+y+'">'+y+' season</option>'; }).join('');
+    selY.value=(opts.years&&opts.years.length)?String(opts.years[0]):'';
+    return opts;
+  }
+
+  function rosterFor(){
+    if(mode==='pitcher'||mode==='bullpen')return opts.pitchers||[];
+    if(mode==='compare')return (selRole.value==='pitcher'?opts.pitchers:opts.hitters)||[];
+    return opts.hitters||[];
+  }
+
+  function fillPlayers(){
+    // the bullpen form hides the season picker, so it must not inherit its value
+    const y=(mode!=='bullpen'&&selY.value)?parseInt(selY.value,10):null;
+    const list=rosterFor().filter(function(p){ return !y||p.years.indexOf(y)>=0; });
+    const options=list.map(function(p){
+      return '<option value="'+esc(p.name)+'">'+esc(p.name)+'</option>'; }).join('');
+    const keep=selP.value, keep2=selP2.value;
+    selP.innerHTML=(mode==='bullpen'?'<option value="">All charted pitchers</option>':'')+options;
+    selP2.innerHTML=options;
+    if(keep)selP.value=keep;
+    if(keep2)selP2.value=keep2;
+    if(!selP.value&&selP.options.length)selP.selectedIndex=0;
+    if(!selP2.value&&selP2.options.length>1)selP2.selectedIndex=1;
+  }
+
+  async function openReport(kind){
+    document.querySelectorAll('.ca-rep').forEach(function(b){
+      b.classList.toggle('on',b.dataset.rep===kind); });
+    mode=kind;
+    repForm.hidden=false;
+    repGo.disabled=true; repGo.textContent='Loading…';
+    try{ await loadOptions(); }
+    catch(e){ repGo.textContent='Build Report'; repGo.disabled=false;
+              bubble('ca-bot','Could not load the roster list — try again in a moment.'); return; }
+    repGo.textContent='Build Report'; repGo.disabled=false;
+    selRole.hidden=(kind!=='compare');
+    selP.hidden=(kind==='team');
+    selP2.hidden=(kind!=='compare');
+    selY.hidden=(kind==='team'||kind==='bullpen');
+    if(kind!=='team')fillPlayers();
+  }
+
+  function reportPrompt(){
+    const year=selY.value, span=year?year:'all seasons, 2024-2026';
+    if(mode==='team')return 'Build a team report for the 2026 season.';
+    if(mode==='bullpen')return 'Build a bullpen report for '+(selP.value||'all charted pitchers')+'.';
+    if(mode==='compare')return 'Build a compare report: '+selP.value+' vs '+selP2.value+
+      ' ('+(selRole.value==='pitcher'?'pitchers':'hitters')+', '+span+').';
+    return 'Build a full '+mode+' report for '+selP.value+' ('+span+').';
+  }
+
+  document.querySelector('.ca-rep-row').addEventListener('click',function(e){
+    const btn=e.target.closest('.ca-rep');
+    if(btn)openReport(btn.dataset.rep);
+  });
+  selY.addEventListener('change',function(){ if(mode&&mode!=='team')fillPlayers(); });
+  selRole.addEventListener('change',fillPlayers);
+  repCancel.addEventListener('click',function(){
+    repForm.hidden=true; mode=null;
+    document.querySelectorAll('.ca-rep').forEach(function(b){ b.classList.remove('on'); });
+  });
+  repGo.addEventListener('click',function(){
+    if(mode!=='team'&&mode!=='bullpen'&&!selP.value){
+      bubble('ca-bot','No charted players for that season — pick another season.'); return;
+    }
+    if(mode==='compare'&&(!selP2.value||selP2.value===selP.value)){
+      bubble('ca-bot','Pick two different players to compare.'); return;
+    }
+    ask(reportPrompt());
+  });
+
+  // ---- asking ----------------------------------------------------------
+  async function ask(text){
+    const typed=(typeof text!=='string');
+    const q=(typed?input.value:text).trim();
     if(!q||busy)return;
-    busy=true; send.disabled=true; input.value='';
+    busy=true; send.disabled=true; repGo.disabled=true;
+    if(typed)input.value='';
     bubble('ca-user',q); hist.push({role:'user',text:q});
     const typing=document.createElement('div');
     typing.className='ca-typing'; typing.textContent='•••';
@@ -725,17 +960,18 @@ body{
         body:JSON.stringify({messages:hist})});
       const d=await r.json().catch(()=>({}));
       typing.remove();
-      const reply=(r.ok&&d.reply)?d.reply:(d.error||'Something went wrong — try again.');
-      bubble('ca-bot',reply);
-      if(r.ok&&d.reply)hist.push({role:'assistant',text:d.reply});
+      const ok=r.ok&&d.reply;
+      bubble('ca-bot',ok?d.reply:(d.error||'Something went wrong — try again.'),ok);
+      if(ok)hist.push({role:'assistant',text:d.reply});
     }catch(e){
       typing.remove();
       bubble('ca-bot','Could not reach the assistant — check your connection and try again.');
     }finally{
-      busy=false; send.disabled=false; input.focus();
+      busy=false; send.disabled=false; repGo.disabled=false;
+      if(typed)input.focus();   // don't pop the mobile keyboard on a report tap
     }
   }
-  send.addEventListener('click',ask);
+  send.addEventListener('click',function(){ask();});
   input.addEventListener('keydown',e=>{if(e.key==='Enter')ask();});
 })();
 </script>
