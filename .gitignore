@@ -6,3 +6,15 @@ __pycache__/
 # DATABASE_URL; this file only exists when running the hub on your machine.
 playerdev.db
 *.db
+
+# Rapsodo pipeline: cached session token, raw API archive, derived CSVs.
+# The raw payloads also go into raw_imports, which is what survives a redeploy --
+# Railway's filesystem does not.
+token.json
+raw/
+out/
+
+# NOTE: railway.json is deliberately NOT ignored here -- `railway up` honours
+# .gitignore, so listing it would strip the deploy config out of the upload.
+# It is excluded from git via .git/info/exclude instead, which keeps it out of
+# commits (and so out of any future merge to main) while still shipping.

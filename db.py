@@ -69,6 +69,30 @@ player_vendor_ids = Table(
     UniqueConstraint("vendor", "vendor_id", name="uq_vendor_id"),
 )
 
+# Level is per SEASON, not a column on the player. A kid who was JV as a sophomore
+# and varsity as a junior is exactly the progression a development system exists to
+# show; a single `level` field would overwrite that history and it can't be
+# reconstructed afterwards. Source of truth is the school's own roster pages
+# (letsgobigmoe.com), scraped per level -- see rapsodo/scrape_roster.py.
+player_seasons = Table(
+    "player_seasons", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("player_id", Integer, ForeignKey("players.id"), nullable=False),
+    Column("season", Integer, nullable=False),          # 2026 = spring 2026
+    Column("level", String(12), nullable=False),        # varsity | jv | freshman
+    Column("jersey", String(4)),
+    Column("position", String(24)),                     # as the roster lists it, e.g. "P/INF"
+    Column("academic_year", String(12)),                # Freshman..Senior in that season
+    Column("height_in", Integer),
+    Column("is_pitcher", Boolean, server_default="0"),
+    Column("active", Boolean, server_default="1"),      # false = cut / left the program
+    Column("source", String(20), server_default="roster_site"),
+    Column("created_at", DateTime, server_default=func.now()),
+    UniqueConstraint("player_id", "season", name="uq_player_season"),
+)
+
+Index("ix_player_seasons_season_level", player_seasons.c.season, player_seasons.c.level)
+
 
 # ===========================================================================
 # Ingest -- layer 1: nothing uploaded is ever discarded  (spec section 5.3)
