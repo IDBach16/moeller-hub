@@ -127,6 +127,15 @@
 .note-caveat{margin:.8rem 0 0;font-size:.78rem;font-style:italic;
   color:rgba(255,255,255,.5)}
 
+/* baseline-building progress: a pitcher's first 3 bullpens set his baseline */
+.bdots{display:inline-flex;gap:.32rem;margin-right:.6rem;vertical-align:baseline}
+.bdots i{width:9px;height:9px;border-radius:50%;display:inline-block;
+  background:rgba(255,255,255,.13)}
+.bdots i.on{background:var(--gold)}
+.baseline-tag{display:inline-block;margin-right:.5rem;padding:.1rem .5rem;
+  border-radius:99px;background:var(--gold-dim);color:var(--gold);
+  font-family:ui-monospace,Consolas,monospace;font-size:.68rem;font-weight:700}
+
 /* ===== Rapsodo report card ===== */
 /* Pitch-type hues are the dark-surface steps validated for colour-blind
    separation -- don't re-pick these by eye. */
@@ -357,6 +366,25 @@
         </div>
       </div>
       {% endfor %}
+    {% elif card and card.has_data and card.n_sessions < 4 %}
+      {# Not enough history for a comparison yet -- say where he is in the
+         build instead of a generic "nothing yet". #}
+      <p class="empty baseline-build">
+        <span class="bdots">
+          {%- for i in range(3) -%}
+          <i class="{{ 'on' if i < card.n_sessions }}"></i>
+          {%- endfor -%}
+        </span>
+        {% if card.n_sessions < 3 %}
+        Building his baseline: {{ card.n_sessions }} of 3 bullpens logged. A
+        pitcher&rsquo;s first three Rapsodo sessions create his baseline &mdash;
+        changes, mix shifts and the full AI read are measured against it from
+        the next session on.
+        {% else %}
+        Baseline set &mdash; his first three bullpens are on record. Changes and
+        mix shifts appear from his next session, measured against these three.
+        {% endif %}
+      </p>
     {% else %}
       <p class="empty">
         No changes detected yet. Change detection compares a recent window against a
@@ -375,6 +403,9 @@
     <section class="panel">
       <h2>Rapsodo report card</h2>
       <p class="hint">
+        {% if card.n_sessions < 4 %}
+        <span class="baseline-tag">baseline {{ [card.n_sessions, 3]|min }}/3</span>
+        {% endif %}
         {{ card.n_pitches }} tracked pitches over {{ card.n_sessions }} bullpen{{ '' if card.n_sessions == 1 else 's' }},
         {{ card.span[0] }} to {{ card.span[1] }}. Failed radar tracks are excluded.
       </p>
