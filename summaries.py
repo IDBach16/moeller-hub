@@ -286,9 +286,13 @@ def cached(engine, player_id, current_basis=None):
 
 def store(engine, player_id, want, text, model=MODEL):
     with engine.begin() as conn:
-        # One row per player: an out-of-date summary is worthless, not history.
+        # One row per player PER KIND -- the full note and the header line are
+        # cached independently (a headline basis starts with 'hl-'), and an
+        # out-of-date one is worthless, not history.
+        kind = db.ai_summaries.c.basis.like("hl-%")
         conn.execute(delete(db.ai_summaries)
-                     .where(db.ai_summaries.c.player_id == player_id))
+                     .where(db.ai_summaries.c.player_id == player_id)
+                     .where(kind if want.startswith("hl-") else ~kind))
         conn.execute(insert(db.ai_summaries).values(
             player_id=player_id, basis=want, summary=text, model=model))
 
@@ -310,6 +314,62 @@ def _call_model(context):
                               + json.dumps(context, indent=1, default=str)}],
     )
     return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+
+# The one-line read at the top of a pitcher's profile. Same analyst, much
+# shorter leash: it states who he is on the mound right now, and nothing else.
+HEADLINE_SYSTEM = """You are the pitching development analyst for Archbishop \
+Moeller High School, writing the single line under a pitcher's name at the top \
+of his page.
+
+ONE sentence, at most 28 words, plain text. Say who he is on the mound right \
+now: arsenal identity (slot, fastball velo, what he leans on), plus the one \
+current development headline if the context has one.
+
+Rules: every number comes from the context; name the pitch, never generalise one \
+pitch's number to the arsenal; no advice, no hedging boilerplate, no "the data \
+shows"; do not repeat his name -- it is printed directly above this line."""
+
+
+def generate_headline(engine, player_id, force=False, call_model=None):
+    """The header line, cached exactly like the full note."""
+    want = "hl-" + basis(engine, player_id)[:32]
+    if not force:
+        hit = cached(engine, player_id, want)
+        if hit:
+            return {**hit, "cached": True}
+
+    ctx = build_context(engine, player_id)
+    if not has_anything_to_say(ctx):
+        return {"summary": None, "cached": False, "skipped": "no data yet"}
+
+    if call_model is None:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return {"summary": None, "cached": False,
+                    "skipped": "no ANTHROPIC_API_KEY on the server"}
+
+        def call_model(context):
+            import anthropic
+            client = anthropic.Anthropic()
+            resp = client.messages.create(
+                # The model thinks by default and max_tokens caps thinking AND
+                # text together -- 120 truncated a headline mid-word.
+                model=MODEL, max_tokens=500,
+                output_config={"effort": "low"},
+                system=[{"type": "text", "text": HEADLINE_SYSTEM,
+                         "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user",
+                           "content": "Write the header line.\n\n"
+                                      + json.dumps(context, indent=1, default=str)}])
+            if resp.stop_reason == "max_tokens":
+                return ""   # never cache a cut-off line
+            return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+    text = call_model(ctx)
+    if not text:
+        return {"summary": None, "cached": False, "skipped": "model returned nothing"}
+    store(engine, player_id, want, text)
+    return {"summary": text, "model": MODEL, "basis": want, "cached": False}
 
 
 def generate(engine, player_id, force=False, call_model=None):
@@ -381,6 +441,8 @@ def run_weekly(engine, days=7, everyone=False, call_model=None, dry_run=False,
         else:
             out["skipped"] += 1
         out["results"].append({"player_id": pid, **res})
+        # The header line rides along -- tiny output, same cache discipline.
+        generate_headline(engine, pid, call_model=call_model)
     return out
 
 

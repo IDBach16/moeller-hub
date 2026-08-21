@@ -400,8 +400,17 @@ def create_app():
     @app.route("/players")
     def players_page():
         import profiles
+        import rapsodo_card
         return render_template("players.html", nav="players",
-                               roster=profiles.roster(_engine()))
+                               roster=profiles.roster(_engine()),
+                               # Per-pitcher visuals (velo, mix, movement, slot)
+                               # so the grid reads like a wall of cards, not a
+                               # list of names.
+                               viz=rapsodo_card.roster_cards(_engine()),
+                               # Hitter visuals -- empty until the first Blast /
+                               # HitTrax export lands, then the grid lights up
+                               # on its own.
+                               hviz=profiles.hitter_cards(_engine()))
 
     @app.route("/players/<slug>")
     def player_page(slug):
@@ -600,6 +609,22 @@ def create_app():
             return jsonify(summaries.generate(engine, player_id, force=force))
         except Exception as e:
             return jsonify({"error": f"Could not write a summary: {e}"}), 500
+
+    @app.route("/api/players/<int:player_id>/headline")
+    def api_headline(player_id):
+        """The one-line analyst read under the name. Served from cache when the
+        player's data hasn't moved; generated (one small call) when it has --
+        the page loads instantly and this fills in behind it."""
+        import summaries
+        engine = _engine()
+        try:
+            if writes_enabled():
+                return jsonify(summaries.generate_headline(engine, player_id))
+            hit = summaries.cached(
+                engine, player_id, "hl-" + summaries.basis(engine, player_id)[:32])
+            return jsonify(hit or {"summary": None, "note": "no current headline"})
+        except Exception as e:                              # noqa: BLE001
+            return jsonify({"summary": None, "error": str(e)}), 500
 
     @app.route("/api/summaries/weekly", methods=["POST"])
     def api_weekly_summaries():

@@ -105,6 +105,82 @@ def roster(engine, q=None, side=None):
     return out
 
 
+# The attack-angle scale the grid's band bar is drawn on. Wider than the target
+# band so an out-of-band hitter still lands ON the bar instead of pinning.
+AA_SCALE = (-10.0, 25.0)
+
+
+def hitter_cards(engine):
+    """Per-hitter visual summary for the players grid, one pass over swings.
+
+    Empty today -- no Blast or HitTrax export has been ingested -- and that is
+    the point of building it now: the grid lights up by itself the morning the
+    first export lands, the same way the pitcher cards appeared when Rapsodo
+    loaded. Until then every hitter keeps the quiet card, which is honest.
+    """
+    KEYS = ["bat_speed", "attack_angle", "on_plane_efficiency",
+            "exit_velocity", "max_exit_velocity"]
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(db.swings.c.player_id, db.sessions.c.session_date,
+                   db.swings.c.metric_key, db.swings.c.value)
+            .select_from(db.swings.join(
+                db.sessions, db.sessions.c.id == db.swings.c.session_id))
+            .where(db.swings.c.metric_key.in_(KEYS))
+            .where(db.swings.c.value.isnot(None))).all()
+    if not rows:
+        return {}
+
+    acc: dict[int, dict] = {}
+    for r in rows:
+        p = acc.setdefault(r.player_id, {k: [] for k in KEYS})
+        p[r.metric_key].append(float(r.value))
+        if r.metric_key == "bat_speed":
+            p.setdefault("_by_date", {}).setdefault(str(r.session_date), []) \
+             .append(float(r.value))
+
+    band = metrics.get("attack_angle").target_band or (5.0, 15.0)
+    lo, hi = AA_SCALE
+    pct = lambda v: round(100.0 * (min(max(v, lo), hi) - lo) / (hi - lo), 1)
+
+    out = {}
+    for pid, d in acc.items():
+        bs = d["bat_speed"]
+        if len(bs) < 5:                 # a handful of swings isn't a profile
+            continue
+        card = {
+            "bat": round(sum(bs) / len(bs), 1),
+            "bat_max": round(max(bs), 1),
+            "n_swings": len(bs),
+        }
+        if d["attack_angle"]:
+            aa = sum(d["attack_angle"]) / len(d["attack_angle"])
+            card["aa"] = round(aa, 1)
+            card["aa_pct"] = pct(aa)
+            card["aa_in_band"] = band[0] <= aa <= band[1]
+            card["band_lo_pct"], card["band_hi_pct"] = pct(band[0]), pct(band[1])
+        if d["on_plane_efficiency"]:
+            card["ope"] = int(round(sum(d["on_plane_efficiency"])
+                                    / len(d["on_plane_efficiency"])))
+        ev = d["exit_velocity"] or []
+        if ev:
+            card["ev"] = round(sum(ev) / len(ev), 1)
+            card["ev_max"] = round(max(d["max_exit_velocity"] or ev), 1)
+        # Bat-speed trend, one point per session, drawn server-side so the grid
+        # ships no extra JS. Points land in a 74x74 box with a 6px inset.
+        by_date = sorted(d.get("_by_date", {}).items())
+        if len(by_date) >= 2:
+            means = [sum(v) / len(v) for _dt, v in by_date]
+            mlo, mhi = min(means), max(means)
+            span = (mhi - mlo) or 1.0
+            n = len(means)
+            card["spark"] = " ".join(
+                f"{6 + i * (62 / (n - 1)):.1f},{64 - (m - mlo) / span * 54:.1f}"
+                for i, m in enumerate(means))
+        out[pid] = card
+    return out
+
+
 # ---------------------------------------------------------------------------
 # One player
 # ---------------------------------------------------------------------------

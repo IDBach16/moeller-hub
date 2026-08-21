@@ -46,6 +46,112 @@ def _mean(vals):
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
+def _circular_mean(degs):
+    """Mean of angles in degrees -- a naive average of 355 and 5 is 180."""
+    import math
+    if not degs:
+        return None
+    x = sum(math.cos(math.radians(d)) for d in degs)
+    y = sum(math.sin(math.radians(d)) for d in degs)
+    if x == 0 and y == 0:
+        return None
+    return math.degrees(math.atan2(y, x)) % 360
+
+
+def _slot_from_axis(axis_mean):
+    """Arm angle above horizontal, inferred from fastball spin axis (0 = 12:00).
+    Same method as the Rapsodo dashboard: tilt tracks the arm and, unlike
+    release position, doesn't care where the kid stands on the rubber."""
+    if axis_mean is None:
+        return None
+    dev = min(axis_mean, 360.0 - axis_mean)
+    return round(90.0 - dev, 1)
+
+
+def _slot_name(angle):
+    if angle is None:
+        return None
+    if angle >= 70:
+        return "over the top"
+    if angle >= 45:
+        return "high three-quarters"
+    if angle >= 20:
+        return "three-quarters"
+    if angle >= 0:
+        return "low three-quarters"
+    return "sidearm"
+
+
+def roster_cards(engine):
+    """Per-pitcher visual summary for the players grid: fastball velo, pitch-mix
+    segments, per-pitch movement means for a thumbnail, and arm slot.
+
+    One pass over pitch_metrics for the whole roster -- the grid shows 69 cards
+    and must not run 69 queries.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(db.pitch_metrics.c.player_id, db.pitch_metrics.c.pitch_type,
+                   db.pitch_metrics.c.metric_key, db.pitch_metrics.c.value)
+            .select_from(db.pitch_metrics.join(
+                db.sessions, db.sessions.c.id == db.pitch_metrics.c.session_id))
+            .where(db.sessions.c.source == "rapsodo")
+            .where(db.pitch_metrics.c.metric_key.in_(
+                ["velocity", "induced_vertical_break",
+                 "horizontal_break", "spin_axis", "is_strike"]))).all()
+        levels = {r.player_id: r.level for r in conn.execute(
+            select(db.player_seasons.c.player_id, db.player_seasons.c.level))}
+
+    acc: dict[tuple, dict] = {}
+    for r in rows:
+        if not r.pitch_type:
+            continue
+        acc.setdefault((r.player_id, r.pitch_type), {}) \
+           .setdefault(r.metric_key, []).append(r.value)
+
+    out: dict[int, dict] = {}
+    for (pid, pt), d in acc.items():
+        velos = d.get("velocity", [])
+        if len(velos) < 3:          # one mis-tagged pitch shouldn't paint a card
+            continue
+        card = out.setdefault(pid, {"level": levels.get(pid), "total": 0,
+                                    "mix": [], "fb": None, "fb_max": None,
+                                    "slot": None, "slot_name": None,
+                                    "_strikes": 0, "_zone_n": 0})
+        card["total"] += len(velos)
+        # The device's own zone call, stored 1/0 -- a location check, not a
+        # game strike rate, and the card labels it "zone" for that reason.
+        zone = d.get("is_strike", [])
+        card["_strikes"] += int(sum(zone))
+        card["_zone_n"] += len(zone)
+        card["mix"].append({
+            "pt": pt, "n": len(velos),
+            "velo": round(sum(velos) / len(velos), 1),
+            "ivb": round(sum(d["induced_vertical_break"]) / len(d["induced_vertical_break"]), 1)
+                   if d.get("induced_vertical_break") else None,
+            "hb": round(sum(d["horizontal_break"]) / len(d["horizontal_break"]), 1)
+                  if d.get("horizontal_break") else None,
+        })
+        if pt == "FB":
+            card["fb"] = round(sum(velos) / len(velos), 1)
+            card["fb_max"] = round(max(velos), 1)
+            axes = d.get("spin_axis", [])
+            if len(axes) >= 10:
+                card["slot"] = _slot_from_axis(_circular_mean(axes))
+                card["slot_name"] = _slot_name(card["slot"])
+
+    order = {p: i for i, p in enumerate(PITCH_ORDER)}
+    for card in out.values():
+        card["mix"].sort(key=lambda m: order.get(m["pt"], 99))
+        for m in card["mix"]:
+            m["pct"] = round(100.0 * m["n"] / card["total"], 1)
+        if card["_zone_n"]:
+            card["strike_pct"] = int(round(100.0 * card["_strikes"] / card["_zone_n"]))
+            card["ball_pct"] = 100 - card["strike_pct"]
+        del card["_strikes"], card["_zone_n"]
+    return out
+
+
 def card(engine, player_id: int) -> dict:
     """Plot-ready Rapsodo summary for one pitcher, or {'has_data': False}."""
     with engine.connect() as conn:

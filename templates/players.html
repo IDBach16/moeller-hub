@@ -23,6 +23,51 @@
   letter-spacing:.05em;transition:all .2s;
 }
 .seg button.on{background:var(--gold-dim);color:var(--gold)}
+
+/* ===== card visuals ===== */
+/* Pitch hues -- the same dark-surface set as the report card and the Rapsodo
+   dashboard, so a slider is the same teal everywhere a coach sees one. */
+.pcard{--pt-FB:#5E8CE8;--pt-CH:#B87423;--pt-SL:#12A18F;--pt-CB:#9463D0;
+  --pt-SI:#D14372;--pt-CT:#C9A227;--pt-SP:#7FA6B8;--pt-UNK:#767D85}
+.viz{display:flex;gap:.9rem;align-items:center;margin-top:.8rem;
+  padding-top:.8rem;border-top:1px solid rgba(255,255,255,.07)}
+.viz .nums{flex:1;min-width:0}
+.viz .fb{font-family:ui-monospace,Consolas,monospace;font-size:1.35rem;
+  font-weight:800;line-height:1.05}
+.viz .fb small{font-size:.68rem;font-weight:400;color:rgba(255,255,255,.4);
+  margin-left:.2rem}
+.viz .slot{font-size:.7rem;color:rgba(255,255,255,.5);margin-top:.15rem}
+.viz .slot b{color:var(--gold-light);font-weight:600}
+.mini{flex:none;width:74px;height:74px;background:rgba(0,0,0,.3);
+  border:1px solid rgba(255,255,255,.08);border-radius:9px}
+.mixbar{display:flex;height:7px;border-radius:99px;overflow:hidden;
+  margin-top:.6rem;background:rgba(255,255,255,.07)}
+.mixbar span{display:block;height:100%}
+.mixlbl{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:.35rem;
+  font-family:ui-monospace,Consolas,monospace;font-size:.62rem;
+  color:rgba(255,255,255,.45)}
+.mixlbl i{font-style:normal;display:inline-flex;align-items:center;gap:.28rem}
+.mixlbl .d{width:7px;height:7px;border-radius:50%;display:inline-block}
+
+/* strike/ball split -- the same good/bad greens and reds as the change pills */
+.szbar{display:flex;height:7px;border-radius:99px;overflow:hidden;
+  margin-top:.6rem;background:rgba(255,255,255,.07)}
+.szbar span{display:block;height:100%}
+.szbar .s{background:#8fd9a4}
+.szbar .b{background:rgba(231,154,154,.55)}
+
+/* hitter cards: attack-angle band bar + bat-speed trend */
+.aaband{position:relative;height:7px;border-radius:99px;
+  background:rgba(255,255,255,.07);margin-top:.6rem}
+.aaband .zone{position:absolute;top:0;bottom:0;background:var(--gold-dim);
+  border-radius:99px}
+.aaband .mk{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;
+  transform:translate(-50%,-50%);border:2px solid var(--navy-deep)}
+.aaband .mk.in{background:#8fd9a4}
+.aaband .mk.out{background:#e79a9a}
+.aalbl{display:flex;justify-content:space-between;margin-top:.35rem;
+  font-family:ui-monospace,Consolas,monospace;font-size:.62rem;
+  color:rgba(255,255,255,.45)}
 </style>
 {% endblock %}
 
@@ -60,6 +105,80 @@
         {% if p.changes %}<span class="pill pending">{{ p.changes }} change{{ '' if p.changes == 1 else 's' }}</span>{% endif %}
         {% if p.open_goals %}<span class="pill ok">{{ p.open_goals }} goal{{ '' if p.open_goals == 1 else 's' }}</span>{% endif %}
       </div>
+
+      {% set v = viz.get(p.id) %}
+      {% if v %}
+      <div class="viz">
+        <div class="nums">
+          {% if v.fb is not none %}
+          <div class="fb">{{ v.fb }}<small>avg FB &middot; max {{ v.fb_max }}</small></div>
+          {% endif %}
+          {% if v.slot_name %}
+          <div class="slot"><b>{{ v.slot }}&deg;</b> {{ v.slot_name }}</div>
+          {% endif %}
+        </div>
+        {# Movement thumbnail: per-pitch-type mean break on the same fixed
+           +/-25in scale as every other movement plot, pitcher's view. #}
+        <svg class="mini" viewBox="0 0 74 74" role="img" aria-label="movement shape">
+          <line x1="37" y1="4" x2="37" y2="70" stroke="rgba(255,255,255,.1)"/>
+          <line x1="4" y1="37" x2="70" y2="37" stroke="rgba(255,255,255,.1)"/>
+          {% for m in v.mix %}{% if m.hb is not none and m.ivb is not none %}
+          <circle cx="{{ (37 + m.hb * 1.32)|round(1) }}" cy="{{ (37 - m.ivb * 1.32)|round(1) }}"
+                  r="{{ 3 + (m.pct / 22)|round(1) }}"
+                  fill="var(--pt-{{ m.pt }})" fill-opacity=".85"
+                  stroke="#0f0f1e" stroke-width="1"><title>{{ m.pt }} {{ m.velo }} mph</title></circle>
+          {% endif %}{% endfor %}
+        </svg>
+      </div>
+      <div class="mixbar">
+        {% for m in v.mix %}
+        <span style="width:{{ m.pct }}%;background:var(--pt-{{ m.pt }})"
+              title="{{ m.pt }} {{ m.pct }}% &middot; {{ m.velo }} mph"></span>
+        {% endfor %}
+      </div>
+      <div class="mixlbl">
+        {% for m in v.mix %}
+        <i><span class="d" style="background:var(--pt-{{ m.pt }})"></span>{{ m.pt }} {{ m.pct|round|int }}%</i>
+        {% endfor %}
+      </div>
+      {% if v.strike_pct is defined %}
+      {# The unit's own zone call -- location, not a game strike rate. #}
+      <div class="szbar" title="Rapsodo zone call: {{ v.strike_pct }}% strikes, {{ v.ball_pct }}% balls">
+        <span class="s" style="width:{{ v.strike_pct }}%"></span>
+        <span class="b" style="width:{{ v.ball_pct }}%"></span>
+      </div>
+      <div class="aalbl"><span>strikes {{ v.strike_pct }}%</span><span>balls {{ v.ball_pct }}%</span></div>
+      {% endif %}
+      {% endif %}
+
+      {% set h = hviz.get(p.id) %}
+      {% if h %}
+      <div class="viz">
+        <div class="nums">
+          <div class="fb">{{ h.bat }}<small>avg bat</small></div>
+          <div class="slot"><b>{{ h.bat_max }}</b> max
+            {%- if h.ope is defined %} &middot; {{ h.ope }}% on plane{% endif %}</div>
+          {% if h.ev is defined %}
+          <div class="slot"><b>{{ h.ev }}</b> EV &middot; {{ h.ev_max }} max</div>
+          {% endif %}
+        </div>
+        {% if h.spark %}
+        {# Bat speed by session -- the trend a hitting coach checks first. #}
+        <svg class="mini" viewBox="0 0 74 74" role="img" aria-label="bat speed trend">
+          <polyline points="{{ h.spark }}" fill="none" stroke="var(--gold)"
+                    stroke-width="2" stroke-linejoin="round"/>
+        </svg>
+        {% endif %}
+      </div>
+      {% if h.aa is defined %}
+      {# Attack angle against its target band -- green in the band, red out. #}
+      <div class="aaband" title="Attack angle {{ h.aa }}&deg; (band {{ 5 }}&ndash;{{ 15 }}&deg;)">
+        <span class="zone" style="left:{{ h.band_lo_pct }}%;width:{{ h.band_hi_pct - h.band_lo_pct }}%"></span>
+        <span class="mk {{ 'in' if h.aa_in_band else 'out' }}" style="left:{{ h.aa_pct }}%"></span>
+      </div>
+      <div class="aalbl"><span>attack angle {{ h.aa }}&deg;</span><span>{{ h.n_swings }} swings</span></div>
+      {% endif %}
+      {% endif %}
     </a>
     {% endfor %}
   </div>

@@ -85,6 +85,12 @@
 .good{color:#8fd9a4}
 .bad{color:#e79a9a}
 
+/* the one-line analyst read under the name */
+.analyst-line{margin-top:.6rem;max-width:64ch;font-size:.95rem;line-height:1.5;
+  color:var(--gold-light);border-left:2px solid var(--gold);padding-left:.7rem;
+  opacity:0;transition:opacity .4s}
+.analyst-line.on{opacity:1}
+
 /* ===== Rapsodo report card ===== */
 /* Pitch-type hues are the dark-surface steps validated for colour-blind
    separation -- don't re-pick these by eye. */
@@ -164,6 +170,9 @@
         {%- if p.last_session %} &middot; Last session {{ p.last_session }}
         {%- else %} &middot; <span class="muted">no training sessions on record</span>{% endif %}
       </div>
+      {% if p.player.is_pitcher and p.training %}
+      <p class="analyst-line" id="analystLine" data-pid="{{ p.player.id }}"></p>
+      {% endif %}
     </div>
     <div class="spacer"></div>
     <a href="/players" class="btn ghost">&larr; Roster</a>
@@ -1007,6 +1016,17 @@ document.querySelectorAll('.ivEval').forEach(b => b.addEventListener('click', as
   });
 
   render();
+})();
+</script>
+
+<script>
+(function(){
+  const el = document.getElementById('analystLine');
+  if(!el) return;
+  fetch('/api/players/' + el.dataset.pid + '/headline')
+    .then(r => r.json())
+    .then(d => { if(d && d.summary){ el.textContent = d.summary; el.classList.add('on'); } })
+    .catch(function(){});
 })();
 </script>
 {% endblock %}
