@@ -32,6 +32,30 @@ import tools
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
+
+def _load_dotenv():
+    """Read a local .env so `python app.py` behaves like the deployed service.
+
+    setdefault, never overwrite: on Railway the platform supplies the real
+    variables and there is no .env, so this is a no-op there. Locally it picks up
+    ANTHROPIC_API_KEY, DATABASE_URL and the Rapsodo credentials from the same
+    gitignored file the pipeline already uses -- otherwise the AI summary reports
+    "no ANTHROPIC_API_KEY on the server" on a dev machine that has one.
+    """
+    path = os.path.join(APP_DIR, ".env")
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8-sig") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
+
 # Empty = no gate. To require a password again, set HUB_PASSWORD on Railway.
 #
 # NOTE (spec section 11): the gate has been off since 2026-08-14. That is fine
@@ -386,8 +410,14 @@ def create_app():
         p = profiles.profile(_engine(), slug)
         if not p:
             return render_template("notfound.html", nav="players", slug=slug), 404
+        # Pitchers get the Rapsodo report card in place of the training-history
+        # table -- a coach reads shapes, not a run-on list of metric averages.
+        card = None
+        if p["player"]["is_pitcher"]:
+            import rapsodo_card
+            card = rapsodo_card.card(_engine(), p["player"]["id"])
         return render_template(
-            "player.html", nav="players", p=p,
+            "player.html", nav="players", p=p, card=card,
             writes_enabled=writes_enabled(),
             metric_options=development.goal_metric_options(),
             directions=db.GOAL_DIRECTIONS,

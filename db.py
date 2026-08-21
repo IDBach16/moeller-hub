@@ -272,6 +272,11 @@ player_baselines = Table(
     "player_baselines", metadata,
     Column("player_id", Integer, ForeignKey("players.id"), primary_key=True),
     Column("metric_key", String(60), primary_key=True),
+    # '' = pooled across pitch types. Part of the key because a fastball's ride
+    # and a slider's are different measurements, not two samples of one -- see
+    # metrics.PITCH_SPECIFIC. Empty string rather than NULL: NULLs in a composite
+    # primary key don't compare equal, so dedupe would silently stop working.
+    Column("pitch_type", String(4), primary_key=True, server_default=""),
     Column("window_end", Date, primary_key=True),
     Column("window_start", Date),
     Column("n", Integer),
@@ -288,6 +293,9 @@ change_events = Table(
     Column("id", Integer, primary_key=True),
     Column("player_id", Integer, ForeignKey("players.id"), nullable=False),
     Column("metric_key", String(60), nullable=False),
+    # Which pitch this is about. NULL = pooled (release point, and the hitting
+    # metrics). A pitch-specific metric with no pitch type is not reportable.
+    Column("pitch_type", String(4)),
     Column("detected_on", Date, nullable=False),
     Column("direction", String(8)),          # up|down
     Column("recent_mean", Float),

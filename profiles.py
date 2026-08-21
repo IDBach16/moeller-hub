@@ -153,8 +153,15 @@ def _training(conn, player_id, side):
                   db.sessions.c.purpose, db.sessions.c.notes, table.c.metric_key)
         .order_by(db.sessions.c.session_date.desc())).all()
 
+    # Stored to be plotted, not trended: an average plate location is meaningless
+    # as a session stat (a pitcher who misses equally high and low averages to the
+    # middle of the zone). The report card charts them instead.
+    PLOT_ONLY = {"plate_side", "plate_height"}
+
     sessions = {}
     for r in rows:
+        if r.metric_key in PLOT_ONLY:
+            continue
         s = sessions.setdefault(r.id, {
             "id": r.id, "date": str(r.session_date), "type": r.session_type,
             "source": r.source, "purpose": r.purpose, "notes": r.notes,
@@ -211,9 +218,18 @@ def _changes(conn, player_id):
         select(db.change_events)
         .where(db.change_events.c.player_id == player_id)
         .order_by(db.change_events.c.detected_on.desc()).limit(20)).all()
-    return [{"id": r.id, "metric_key": r.metric_key,
-             "label": (metrics.get(r.metric_key).label
-                       if metrics.get(r.metric_key) else r.metric_key),
+    def label_for(row):
+        m = metrics.get(row.metric_key)
+        base = m.label if m else row.metric_key
+        # Name the pitch. "Horizontal break is up" reads as a fact about the
+        # pitcher; "Fastball horizontal break is up" is the one a coach can act on.
+        if row.pitch_type:
+            pitch = metrics.PITCH_TYPE_LABELS.get(row.pitch_type, row.pitch_type)
+            return f"{pitch} {base[0].lower()}{base[1:]}"
+        return base
+
+    return [{"id": r.id, "metric_key": r.metric_key, "pitch_type": r.pitch_type,
+             "label": label_for(r),
              "detected_on": str(r.detected_on), "direction": r.direction,
              "delta": r.delta, "effect_size": r.effect_size,
              "p_value": r.p_value, "severity": r.severity, "favorable": r.favorable,
@@ -313,6 +329,13 @@ def _game_performance(name, is_pitcher):
         try:
             r = agent.tool_season_pitching(name)
             out["pitching"] = None if r.get("error") else r
+            # Tag each game pitch type with our canonical code so the arsenal is
+            # coloured the same as the Rapsodo card and the two can be read side
+            # by side. "Breaking Ball" resolves to None on purpose -- it could be a
+            # slider or a curve, so it stays grey rather than borrowing a colour.
+            if out["pitching"]:
+                for t in out["pitching"].get("pitch_types") or []:
+                    t["code"] = metrics.normalize_pitch_type(t.get("pitch_type"))
         except Exception as e:
             out["pitching_error"] = str(e)
     try:
@@ -321,6 +344,73 @@ def _game_performance(name, is_pitcher):
     except Exception as e:
         out["batting_error"] = str(e)
     return out
+
+
+# Columns that identify the row rather than describe performance. Left in, they
+# rendered as "pitching - player" and "pitching - class_year" on the profile.
+_OFFICIAL_SKIP = {"player", "name", "player_name", "class_year", "class", "year",
+                  "jersey", "number", "no", "team", "is_totals", "pos", "position",
+                  # Bookkeeping and components of a stat we already show.
+                  "updated_at", "ip_full", "ip_partial", "errors", "id"}
+
+# The book's column names, in the order a coach reads a line.
+_OFFICIAL_ORDER = ["g", "gs", "w", "l", "sv", "ip", "era", "whip", "h", "r", "er",
+                   "bb", "so", "k", "hbp",
+                   "avg", "obp", "slg", "ops", "pa", "ab", "2b", "3b", "hr", "rbi",
+                   "sb", "cs"]
+_OFFICIAL_LABELS = {"g": "G", "gs": "GS", "w": "W", "l": "L", "sv": "SV", "ip": "IP",
+                    "era": "ERA", "whip": "WHIP", "h": "H", "r": "R", "er": "ER",
+                    "bb": "BB", "so": "K", "k": "K", "hbp": "HBP", "avg": "AVG",
+                    "obp": "OBP", "slg": "SLG", "ops": "OPS", "pa": "PA", "ab": "AB",
+                    "2b": "2B", "3b": "3B", "hr": "HR", "rbi": "RBI", "sb": "SB",
+                    "cs": "CS", "sho": "SHO",
+                    # Rate stats. High school games are seven innings, so the book
+                    # keeps per-7 alongside the conventional per-9.
+                    "h7": "H/7", "bb7": "BB/7", "k7": "K/7", "hr7": "HR/7",
+                    "k9": "K/9", "bb9": "BB/9", "bbk": "BB/K"}
+
+
+# A book line is read at a glance: ERA to hundredths, rate stats to thousandths.
+# The source hands back full float precision ("ERA 1.697").
+_OFFICIAL_DP = {"ERA": 2, "WHIP": 2, "IP": 1,
+                "AVG": 3, "OBP": 3, "SLG": 3, "OPS": 3}
+
+
+def _fmt_official(label, value):
+    dp = _OFFICIAL_DP.get(label)
+    if dp is None:
+        return value
+    try:
+        return f"{float(value):.{dp}f}"
+    except (TypeError, ValueError):
+        return value
+
+
+def _clean_official(row):
+    """Box-score row -> ordered [{label, value}], identity columns dropped.
+
+    Deduped by LABEL, not by column name: some exports carry both `so` and `k`,
+    and keying on the column showed strikeouts twice.
+    """
+    pairs, used_labels = [], set()
+
+    def add(key, orig, v):
+        label = _OFFICIAL_LABELS.get(key, str(orig).upper())
+        if label in used_labels or v in (None, ""):
+            return
+        used_labels.add(label)
+        pairs.append({"label": label, "value": _fmt_official(label, v)})
+
+    lowered = {str(k).strip().lower(): (k, v) for k, v in row.items()}
+    for key in _OFFICIAL_ORDER:
+        if key in lowered:
+            add(key, lowered[key][0], lowered[key][1])
+    # Anything the book has that we didn't anticipate, rather than dropping it.
+    for key, (orig, v) in lowered.items():
+        if key in _OFFICIAL_SKIP:
+            continue
+        add(key, orig, v)
+    return pairs
 
 
 def _team_stats_row(name, is_pitcher):
@@ -340,7 +430,7 @@ def _team_stats_row(name, is_pitcher):
         for row in data["rows"]:
             label = " ".join(str(v) for v in row.values() if isinstance(v, str)).lower()
             if last in label and (first[:3] in label or first in label):
-                out[kind] = row
+                out[kind] = _clean_official(row)
                 break
     return out
 

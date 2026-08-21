@@ -84,6 +84,68 @@
 .addform .grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
 .good{color:#8fd9a4}
 .bad{color:#e79a9a}
+
+/* ===== Rapsodo report card ===== */
+/* Pitch-type hues are the dark-surface steps validated for colour-blind
+   separation -- don't re-pick these by eye. */
+:root{
+  --pt-FB:#5E8CE8; --pt-CH:#B87423; --pt-SL:#12A18F;
+  --pt-CB:#9463D0; --pt-SI:#D14372; --pt-CT:#C9A227; --pt-SP:#7FA6B8;
+  --pt-UNK:#767D85;
+}
+.rap-legend{display:flex;gap:1rem;flex-wrap:wrap;list-style:none;margin:0 0 1rem}
+.rap-legend li{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:rgba(255,255,255,.72)}
+.rap-sw{width:10px;height:10px;border-radius:2px;display:inline-block;flex:none;
+  margin-right:.45rem;vertical-align:baseline;background:var(--pt-UNK)}
+.rap-sw[data-pt=FB]{background:var(--pt-FB)} .rap-sw[data-pt=CH]{background:var(--pt-CH)}
+.rap-sw[data-pt=SL]{background:var(--pt-SL)} .rap-sw[data-pt=CB]{background:var(--pt-CB)}
+.rap-sw[data-pt=SI]{background:var(--pt-SI)} .rap-sw[data-pt=CT]{background:var(--pt-CT)}
+.rap-sw[data-pt=SP]{background:var(--pt-SP)}
+
+.rap-plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  gap:1rem;margin:0 0 1.2rem}
+.rap-plots figure{margin:0;background:rgba(255,255,255,.03);
+  border:1px solid var(--glass-border);border-radius:8px;padding:.7rem}
+.rap-plots figcaption{font-size:.8rem;font-weight:600;margin:0 0 .5rem;color:var(--gold-light)}
+.rap-plots figcaption span{display:block;font-weight:400;font-size:.7rem;
+  color:rgba(255,255,255,.45);letter-spacing:.02em}
+.rap-plots svg{width:100%;height:auto;max-width:100%;display:block}
+.rap-ax{fill:rgba(255,255,255,.45);font-size:9px;font-family:ui-monospace,Consolas,monospace}
+.rap-table{width:100%;border-collapse:collapse}
+.rap-table td.strong{color:#fff;font-weight:700}
+
+/* --- interaction --- */
+.rap-legend li{cursor:pointer;user-select:none;padding:.15rem .45rem;border-radius:4px;
+  border:1px solid transparent;transition:background .12s,opacity .12s}
+.rap-legend li:hover{background:rgba(255,255,255,.06)}
+.rap-legend li[aria-pressed="false"]{opacity:.35}
+.rap-legend li:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.rap-dot{cursor:crosshair}
+/* The hovered pitch is ringed in every plot at once, so a coach can see one
+   pitch's shape and where it finished without hunting for it. */
+.rap-dot.hl{stroke:#fff;stroke-width:2}
+.rap-tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;z-index:60;
+  background:#0b0b16;border:1px solid var(--glass-border);border-radius:6px;
+  padding:.45rem .6rem;font-size:.75rem;line-height:1.5;white-space:pre;
+  color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+.rap-tip b{color:var(--gold-light)}
+.rap-hint{font-size:.72rem;color:rgba(255,255,255,.4);margin:-.5rem 0 1rem}
+
+/* ===== game performance ===== */
+/* Usage lives inside the table as a bar so the mix reads at a glance without
+   spending a second chart on one number per pitch. */
+.gp-bar{display:flex;align-items:center;gap:.5rem;min-width:110px}
+.gp-bar .track{flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.09);
+  overflow:hidden;display:block}
+.gp-bar .fill{display:block;height:100%;border-radius:3px}
+.gp-bar .pct{font-family:ui-monospace,Consolas,monospace;font-size:.78rem;
+  color:rgba(255,255,255,.75);min-width:44px;text-align:right}
+.gp-note{font-size:.72rem;color:rgba(255,255,255,.4);margin:.6rem 0 0}
+.statstrip{display:flex;flex-wrap:wrap;gap:.55rem;margin-top:.7rem}
+.statstrip div{background:rgba(15,15,30,.5);border:1px solid var(--glass-border);
+  border-radius:7px;padding:.4rem .65rem;min-width:62px}
+.statstrip .l{font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
+.statstrip .v{font-family:ui-monospace,Consolas,monospace;font-weight:700;font-size:.95rem}
 </style>
 {% endblock %}
 
@@ -164,11 +226,82 @@
     {% endif %}
   </section>
 
+  <!-- ============ 4. TRAINING HISTORY ============ -->
+  {# The report card sits OUTSIDE .sec-split -- that grid is a hard 1fr 1fr and
+     squeezes the plots to half width. #}
+  {% if card and card.has_data %}
+    <!-- Pitchers get a report card instead of the metric table: a coach between
+         bullpens reads shapes, not a run-on list of eleven averages. -->
+    <section class="panel">
+      <h2>Rapsodo report card</h2>
+      <p class="hint">
+        {{ card.n_pitches }} tracked pitches over {{ card.n_sessions }} bullpen{{ '' if card.n_sessions == 1 else 's' }},
+        {{ card.span[0] }} to {{ card.span[1] }}. Failed radar tracks are excluded.
+      </p>
+
+      <ul class="rap-legend" id="rapLegend"></ul>
+      <p class="rap-hint">Click a pitch to show or hide it. Hover a dot to ring the same pitch in every chart.</p>
+
+      <div class="rap-plots">
+        <figure>
+          <figcaption>Movement <span>break, inches &mdash; fixed &plusmn;25 scale</span></figcaption>
+          <svg id="rapMove" viewBox="0 0 300 300" width="300" height="300"
+               preserveAspectRatio="xMidYMid meet" role="img"
+               aria-label="Pitch movement by type"></svg>
+        </figure>
+        <figure>
+          <figcaption>Location <span>catcher's view, strike zone dashed</span></figcaption>
+          <svg id="rapZone" viewBox="0 0 300 300" width="300" height="300"
+               preserveAspectRatio="xMidYMid meet" role="img"
+               aria-label="Pitch location in the strike zone"></svg>
+        </figure>
+        <figure>
+          <figcaption>Release point <span>catcher's view, feet</span></figcaption>
+          <svg id="rapRel" viewBox="0 0 300 300" width="300" height="300"
+               preserveAspectRatio="xMidYMid meet" role="img"
+               aria-label="Release point by pitch type"></svg>
+        </figure>
+        <figure>
+          <figcaption>Velocity by session <span>mph, 3+ pitches of a type</span></figcaption>
+          <svg id="rapVelo" viewBox="0 0 320 260" width="320" height="260"
+               preserveAspectRatio="xMidYMid meet" role="img"
+               aria-label="Velocity trend by session"></svg>
+        </figure>
+      </div>
+
+      <div class="scroll">
+        <table class="rap-table">
+          <thead><tr>
+            <th>Pitch</th><th>Usage</th><th>N</th><th>Velo</th><th>Max</th>
+            <th>Spin</th><th>IVB</th><th>HB</th><th>Eff</th><th>Rel ht</th><th>Rel side</th>
+          </tr></thead>
+          <tbody>
+            {% for a in card.arsenal %}
+            <tr>
+              <td><span class="rap-sw" data-pt="{{ a.pt }}"></span>{{ a.label }}</td>
+              <td class="mono">{{ a.usage }}%</td>
+              <td class="mono">{{ a.n }}</td>
+              <td class="mono strong">{{ a.velo if a.velo is not none else '&mdash;'|safe }}</td>
+              <td class="mono">{{ a.max if a.max is not none else '&mdash;'|safe }}</td>
+              <td class="mono">{{ a.spin|round|int if a.spin is not none else '&mdash;'|safe }}</td>
+              <td class="mono">{{ a.ivb if a.ivb is not none else '&mdash;'|safe }}</td>
+              <td class="mono">{{ a.hb if a.hb is not none else '&mdash;'|safe }}</td>
+              <td class="mono">{{ a.eff|round|int if a.eff is not none else '&mdash;'|safe }}%</td>
+              <td class="mono">{{ a.rel_h if a.rel_h is not none else '&mdash;'|safe }}</td>
+              <td class="mono">{{ a.rel_s if a.rel_s is not none else '&mdash;'|safe }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <script type="application/json" id="rapData">{{ card|tojson }}</script>
+  </section>
+  {% endif %}
+
   <div class="sec-split">
 
-    <!-- ============ 4. TRAINING HISTORY ============ -->
     <section class="panel">
-      <h2>Training history</h2>
+      <h2>{% if card and card.has_data %}Session log{% else %}Training history{% endif %}</h2>
       <p class="hint">
         {%- if p.player.is_pitcher %}Rapsodo and charted bullpens.{% else %}Blast and HitTrax sessions.{% endif %}
         Session averages, never raw rows.
@@ -207,30 +340,64 @@
 
       {% if p.game.pitching %}
         {% set g = p.game.pitching %}
-        <dl class="kv">
-          <dt>Pitches</dt><dd>{{ '{:,}'.format(g.pitches) }}</dd>
-          <dt>Seasons</dt><dd>{{ g.years|join(', ') }}</dd>
-          <dt>Strike %</dt><dd>{{ g.strike_pct }}%</dd>
-          <dt>Whiff %</dt><dd>{{ g.whiff_pct }}%</dd>
-        </dl>
+        <div class="tiles" style="margin-bottom:1.1rem">
+          <div class="tile">
+            <div class="lbl">Pitches</div>
+            <div class="val">{{ '{:,}'.format(g.pitches) }}</div>
+            <div class="cmp">{{ g.years|join(', ') }}</div>
+          </div>
+          <div class="tile">
+            <div class="lbl">Strike %</div>
+            <div class="val">{{ g.strike_pct }}<span class="u">%</span></div>
+          </div>
+          <div class="tile">
+            <div class="lbl">Whiff %</div>
+            <div class="val">{{ g.whiff_pct }}<span class="u">%</span></div>
+          </div>
+          {% if g.pitch_types %}
+          <div class="tile">
+            <div class="lbl">Pitches thrown</div>
+            <div class="val">{{ g.pitch_types|length }}</div>
+            <div class="cmp">distinct types</div>
+          </div>
+          {% endif %}
+        </div>
+
         {% if g.pitch_types %}
-        <div class="scroll" style="margin-top:1rem">
-          <table>
-            <thead><tr><th>Pitch</th><th>Usage</th><th>Avg</th><th>Max</th><th>Strike%</th><th>Whiff%</th></tr></thead>
+        {% set top = g.pitch_types|map(attribute='usage_pct')|max %}
+        <div class="scroll">
+          <table class="rap-table">
+            <thead><tr>
+              <th>Pitch</th><th>Usage</th><th>Avg</th><th>Max</th><th>Strike%</th><th>Whiff%</th>
+            </tr></thead>
             <tbody>
               {% for t in g.pitch_types %}
               <tr>
-                <td>{{ t.pitch_type }}</td>
-                <td>{{ t.usage_pct }}%</td>
-                <td>{{ t.avg_velo if t.avg_velo else '—' }}</td>
-                <td>{{ t.max_velo if t.max_velo else '—' }}</td>
-                <td>{{ t.strike_pct }}%</td>
-                <td>{{ t.whiff_pct if t.whiff_pct is not none else '—' }}</td>
+                <td><span class="rap-sw" data-pt="{{ t.code or 'UNK' }}"></span>{{ t.pitch_type }}</td>
+                <td>
+                  <span class="gp-bar">
+                    <span class="track"><span class="fill"
+                      style="width:{{ (100 * t.usage_pct / top)|round(1) }}%;
+                             background:var(--pt-{{ t.code or 'UNK' }})"></span></span>
+                    <span class="pct">{{ t.usage_pct }}%</span>
+                  </span>
+                </td>
+                <td class="mono strong">{{ t.avg_velo if t.avg_velo else '&mdash;'|safe }}</td>
+                <td class="mono">{{ t.max_velo if t.max_velo else '&mdash;'|safe }}</td>
+                <td class="mono">{{ t.strike_pct }}%</td>
+                <td class="mono">{{ t.whiff_pct if t.whiff_pct is not none else '&mdash;'|safe }}%</td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
+        {% set unmapped = g.pitch_types|selectattr('code','none')|list %}
+        {% if unmapped %}
+        <p class="gp-note">
+          Grey rows are pitches the charter logged generically (e.g. &ldquo;Breaking Ball&rdquo;),
+          so they can&rsquo;t be matched to a specific Rapsodo pitch type.
+        </p>
+        {% endif %}
         {% endif %}
       {% endif %}
 
@@ -249,20 +416,17 @@
       {% endif %}
 
       {% if p.official %}
-        <h2 style="margin-top:1.4rem;font-size:.95rem">Official 2026 stats</h2>
-        <div class="scroll" style="margin-top:.6rem">
-          <table>
-            <tbody>
-              {% for kind, row in p.official.items() %}
-                {% for k, v in row.items() %}
-                  {% if v is not none and v != '' %}
-                  <tr><td class="muted">{{ kind }} &middot; {{ k }}</td><td>{{ v }}</td></tr>
-                  {% endif %}
-                {% endfor %}
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+        <h2 style="margin-top:1.5rem;font-size:.95rem">Official 2026 book line</h2>
+        {% for kind, pairs in p.official.items() %}
+          {% if pairs %}
+          <p class="hint" style="margin:.5rem 0 0">{{ kind|title }}</p>
+          <div class="statstrip">
+            {% for s in pairs %}
+            <div><div class="l">{{ s.label }}</div><div class="v">{{ s.value }}</div></div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        {% endfor %}
       {% endif %}
     </section>
   </div>
@@ -631,5 +795,218 @@ document.querySelectorAll('.ivEval').forEach(b => b.addEventListener('click', as
   else { b.disabled = false; b.textContent = 'Re-check';
          alert(data.error || 'Could not evaluate.'); }
 }));
+</script>
+
+<!-- ===== Rapsodo report card plots ===== -->
+<script>
+(function(){
+  const holder = document.getElementById('rapData');
+  if(!holder) return;
+  const D = JSON.parse(holder.textContent);
+  if(!D.has_data) return;
+
+  const LABEL = {FB:'Fastball',SI:'Sinker',CT:'Cutter',SL:'Slider',
+                 CB:'Curveball',CH:'Changeup',SP:'Splitter',UNK:'Unlabeled'};
+  const KNOWN = ['FB','SI','CT','SL','CB','CH','SP'];
+  // var() so the palette follows the stylesheet instead of being frozen here.
+  const col = pt => 'var(--pt-' + (KNOWN.includes(pt) ? pt : 'UNK') + ')';
+
+  D.pitches.forEach((p,i) => { p.i = i; });
+
+  const present = D.arsenal.map(a => a.pt);
+  const active  = new Set(present);
+
+  const plots = document.querySelector('.rap-plots');
+  const leg   = document.getElementById('rapLegend');
+  const tip   = document.createElement('div');
+  tip.className = 'rap-tip';
+  document.body.appendChild(tip);
+
+  // ---- legend doubles as the filter --------------------------------------
+  leg.innerHTML = present.map(pt =>
+    '<li role="button" tabindex="0" aria-pressed="true" data-pt="' + pt + '">' +
+    '<span class="rap-sw" data-pt="' + pt + '"></span>' + (LABEL[pt] || pt) + '</li>').join('');
+
+  function toggle(pt){
+    active.has(pt) ? active.delete(pt) : active.add(pt);
+    // Hiding everything would just look broken, so the last one off resets.
+    if(!active.size) present.forEach(p => active.add(p));
+    Array.from(leg.children).forEach(li =>
+      li.setAttribute('aria-pressed', active.has(li.dataset.pt) ? 'true' : 'false'));
+    render();
+  }
+  leg.addEventListener('click', e => {
+    const li = e.target.closest('li[data-pt]'); if(li) toggle(li.dataset.pt);
+  });
+  leg.addEventListener('keydown', e => {
+    if(e.key !== 'Enter' && e.key !== ' ') return;
+    const li = e.target.closest('li[data-pt]');
+    if(li){ e.preventDefault(); toggle(li.dataset.pt); }
+  });
+
+  // ---- geometry -----------------------------------------------------------
+  const W=300,H=300,M={t:12,r:12,b:28,l:34};
+  const nice = (lo,hi) => { if(lo===hi){lo-=1;hi+=1;} const p=(hi-lo)*0.12; return [lo-p,hi+p]; };
+
+  function axes(x0,x1,y0,y1,zero,xticks){
+    const X = v => M.l+(v-x0)/(x1-x0)*(W-M.l-M.r);
+    const Y = v => H-M.b-(v-y0)/(y1-y0)*(H-M.t-M.b);
+    const step = (hi,lo) => { const r=hi-lo, p=Math.pow(10,Math.floor(Math.log10(r)));
+      return r/p>=5 ? p : (r/p>=2 ? p/2 : p/5); };
+    let s = '';
+    if(xticks){
+      for(const t of xticks){
+        s += '<line x1="'+X(t.v)+'" y1="'+M.t+'" x2="'+X(t.v)+'" y2="'+(H-M.b)+'" stroke="rgba(255,255,255,.07)"/>';
+        s += '<text class="rap-ax" x="'+X(t.v)+'" y="'+(H-M.b+12)+'" text-anchor="middle">'+t.label+'</text>';
+      }
+    } else {
+      const sx = step(x1,x0);
+      for(let g=Math.ceil(x0/sx)*sx; g<=x1; g+=sx){
+        s += '<line x1="'+X(g)+'" y1="'+M.t+'" x2="'+X(g)+'" y2="'+(H-M.b)+'" stroke="rgba(255,255,255,.07)"/>';
+        s += '<text class="rap-ax" x="'+X(g)+'" y="'+(H-M.b+12)+'" text-anchor="middle">'+(+g.toFixed(1))+'</text>';
+      }
+    }
+    const sy = step(y1,y0);
+    for(let g=Math.ceil(y0/sy)*sy; g<=y1; g+=sy){
+      s += '<line x1="'+M.l+'" y1="'+Y(g)+'" x2="'+(W-M.r)+'" y2="'+Y(g)+'" stroke="rgba(255,255,255,.07)"/>';
+      s += '<text class="rap-ax" x="'+(M.l-5)+'" y="'+(Y(g)+3)+'" text-anchor="end">'+(+g.toFixed(1))+'</text>';
+    }
+    if(zero){
+      if(x0<0&&x1>0) s += '<line x1="'+X(0)+'" y1="'+M.t+'" x2="'+X(0)+'" y2="'+(H-M.b)+'" stroke="rgba(255,255,255,.22)"/>';
+      if(y0<0&&y1>0) s += '<line x1="'+M.l+'" y1="'+Y(0)+'" x2="'+(W-M.r)+'" y2="'+Y(0)+'" stroke="rgba(255,255,255,.22)"/>';
+    }
+    return {s:s, X:X, Y:Y};
+  }
+
+  // opts.domain fixes the axes. Auto-scaling is what made these unreadable: it
+  // gives every pitcher different axes, so a tight cluster fills the frame and
+  // looks the same as a scattered one. Fixed scales make shapes comparable
+  // between pitchers and across months.
+  function scatter(id,xk,yk,opts){
+    opts = opts || {};
+    const el = document.getElementById(id); if(!el) return;
+    const pts = D.pitches.filter(p => active.has(p.pt) && p[xk]!=null && p[yk]!=null);
+    let x0,x1,y0,y1;
+    if(opts.domain){ x0=opts.domain[0]; x1=opts.domain[1]; y0=opts.domain[2]; y1=opts.domain[3]; }
+    else if(!pts.length){ el.innerHTML=''; return; }
+    else {
+      const nx = nice(Math.min.apply(null,pts.map(p=>p[xk])), Math.max.apply(null,pts.map(p=>p[xk])));
+      const ny = nice(Math.min.apply(null,pts.map(p=>p[yk])), Math.max.apply(null,pts.map(p=>p[yk])));
+      x0=nx[0]; x1=nx[1]; y0=ny[0]; y1=ny[1];
+    }
+    const A = axes(x0,x1,y0,y1,opts.zero,null);
+    let s = A.s;
+    if(opts.zone){
+      // Strike zone: 8.5in either side of the plate, 18-42in off the ground.
+      const zx0=A.X(-8.5), zx1=A.X(8.5), zy0=A.Y(42), zy1=A.Y(18);
+      s += '<rect x="'+zx0+'" y="'+zy0+'" width="'+(zx1-zx0)+'" height="'+(zy1-zy0)+'"'
+         + ' fill="rgba(255,255,255,.04)" stroke="rgba(255,255,255,.5)"'
+         + ' stroke-width="1.2" stroke-dasharray="4 3"/>';
+    }
+    const cl = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+    for(const p of pts){
+      const off = p[xk]<x0||p[xk]>x1||p[yk]<y0||p[yk]>y1;
+      s += '<circle class="rap-dot" data-i="'+p.i+'" cx="'+A.X(cl(p[xk],x0,x1))+'"'
+         + ' cy="'+A.Y(cl(p[yk],y0,y1))+'" r="4" fill="'+col(p.pt)+'"'
+         + ' fill-opacity="'+(off?0.35:0.85)+'" stroke="#0f0f1e" stroke-width="1"/>';
+    }
+    el.innerHTML = s;
+  }
+
+  // Velocity trend is recomputed from the visible pitches so it obeys the filter.
+  function trend(){
+    const el = document.getElementById('rapVelo'); if(!el) return;
+    const pts = D.pitches.filter(p => active.has(p.pt) && p.velo!=null);
+    const dates = Array.from(new Set(pts.map(p=>p.date))).sort();
+    const byDate = {};
+    for(const p of pts){
+      const k = p.date+'|'+p.pt;
+      (byDate[k] = byDate[k] || []).push(p.velo);
+    }
+    const series = {};
+    for(const k in byDate){
+      const parts = k.split('|'), d = parts[0], pt = parts[1], v = byDate[k];
+      // One mis-tagged pitch shouldn't draw a line.
+      if(v.length < 3) continue;
+      (series[pt] = series[pt] || []).push({
+        x: dates.indexOf(d), y: +(v.reduce((a,b)=>a+b,0)/v.length).toFixed(1), n: v.length, date: d, pt: pt
+      });
+    }
+    const all = Object.keys(series).reduce((a,k)=>a.concat(series[k].map(d=>d.y)), []);
+    if(!all.length){ el.innerHTML=''; return; }
+    const ny = nice(Math.min.apply(null,all), Math.max.apply(null,all));
+    const x1 = Math.max(dates.length-1, 1);
+    const every = Math.ceil(dates.length/5);
+    const short = d => { const q=d.split('-'); return (+q[1])+'/'+q[2]; };
+    const ticks = dates.map((d,i)=>({v:i,label:short(d)}))
+                       .filter((_,i)=> i%every===0 || i===dates.length-1);
+    const A = axes(0,x1,ny[0],ny[1],false,ticks);
+    let s = A.s;
+    for(const pt in series){
+      const pairs = series[pt].sort((a,b)=>a.x-b.x);
+      if(pairs.length>1)
+        s += '<polyline fill="none" stroke="'+col(pt)+'" stroke-width="2" stroke-linejoin="round" points="'
+           + pairs.map(d=>A.X(d.x)+','+A.Y(d.y)).join(' ') + '"/>';
+      for(const d of pairs)
+        s += '<circle class="rap-tdot" data-pt="'+d.pt+'" data-date="'+d.date+'" data-velo="'+d.y+'"'
+           + ' data-n="'+d.n+'" cx="'+A.X(d.x)+'" cy="'+A.Y(d.y)+'" r="4.5" fill="'+col(pt)+'"'
+           + ' stroke="#0f0f1e" stroke-width="1"/>';
+    }
+    el.innerHTML = s;
+  }
+
+  function render(){
+    scatter('rapMove','hb','ivb',{domain:[-25,25,-25,25], zero:true});
+    scatter('rapZone','px','pz',{domain:[-24,24,0,60], zone:true});
+    // Feet: 4ft either side of the rubber, 3-7ft up -- covers a true sidearm to
+    // a tall over-the-top kid, so slot changes read as movement on the plot.
+    scatter('rapRel','rel_s','rel_h',{domain:[-4,4,3,7], zero:true});
+    trend();
+  }
+
+  // ---- hover: tooltip + cross-plot highlight ------------------------------
+  const fmt = (v,u) => v==null ? '--' : v+(u||'');
+  function place(e){
+    const pad = 14;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    const r = tip.getBoundingClientRect();
+    if(x + r.width  > innerWidth  - 8) x = e.clientX - r.width  - pad;
+    if(y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+    tip.style.left = x+'px'; tip.style.top = y+'px';
+  }
+  function clearHl(){
+    plots.querySelectorAll('.rap-dot.hl').forEach(n => n.classList.remove('hl'));
+  }
+  plots.addEventListener('mouseover', e => {
+    const dot = e.target.closest('.rap-dot');
+    if(dot){
+      const p = D.pitches[+dot.dataset.i];
+      clearHl();
+      // Ring this same pitch in every chart at once.
+      plots.querySelectorAll('.rap-dot[data-i="'+p.i+'"]').forEach(n => n.classList.add('hl'));
+      tip.innerHTML = '<b>'+(LABEL[p.pt]||p.pt)+'</b>  '+fmt(p.velo,' mph')+'\n'
+        + 'Spin '+fmt(p.spin==null?null:Math.round(p.spin),' rpm')+'\n'
+        + 'IVB '+fmt(p.ivb,'"')+'   HB '+fmt(p.hb,'"')+'\n'
+        + 'Release '+fmt(p.rel_h,'ft')+' / '+fmt(p.rel_s,'ft')+'\n'
+        + p.date;
+      tip.style.opacity = 1; place(e);
+      return;
+    }
+    const td = e.target.closest('.rap-tdot');
+    if(td){
+      tip.innerHTML = '<b>'+(LABEL[td.dataset.pt]||td.dataset.pt)+'</b>  '+td.dataset.velo+' mph avg\n'
+        + td.dataset.n+' pitches\n' + td.dataset.date;
+      tip.style.opacity = 1; place(e);
+    }
+  });
+  plots.addEventListener('mousemove', e => { if(tip.style.opacity==='1') place(e); });
+  plots.addEventListener('mouseout', e => {
+    if(e.target.closest('.rap-dot') || e.target.closest('.rap-tdot')){
+      clearHl(); tip.style.opacity = 0;
+    }
+  });
+
+  render();
+})();
 </script>
 {% endblock %}

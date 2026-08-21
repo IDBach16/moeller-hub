@@ -118,7 +118,8 @@ check("every canonical code has a label",
 
 
 print("\n4. tools")
-check("8 tools registered", len(tools.TOOLS) == 8, str(len(tools.TOOLS)))
+# 9 = the original 8 plus Moeller Rapsodo (2026-08-21).
+check("9 tools registered", len(tools.TOOLS) == 9, str(len(tools.TOOLS)))
 check("every tool has a url and an icon",
       all(t.get("url") and t.get("icon") for t in tools.TOOLS))
 check("tool keys are unique",
@@ -240,10 +241,15 @@ check("unknown player 404s", r.status_code == 404, f"got {r.status_code}")
 # Nav is present on every page and marks the current section.
 r = client.get("/team")
 body = r.get_data(as_text=True)
-for item in ["Players", "Team Development", "Game Prep", "Video",
-             "Data Collection", "Tools"]:
+for item in ["Players", "Team Development", "Game Prep", "Video", "Tools"]:
     check(f"  nav item present: {item}", f">{item}<" in body)
 check("  current section marked active", 'href="/team" class="active"' in body)
+
+# Data Collection was taken off the nav (Ian, 2026-08-19): the roster now comes
+# from the school's roster pages, so coaches have no reason to land there. The
+# route still works for whoever needs the name-review queue.
+check("  Data Collection is off the nav", ">Data Collection<" not in body)
+check("  /collect still reachable directly", client.get("/collect").status_code == 200)
 
 # The tool cards moved off the front page but none were lost.
 tools_body = client.get("/tools").get_data(as_text=True)

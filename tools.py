@@ -12,6 +12,18 @@ see PLAYER_DEV_SPEC.md section 8.1.
 
 TOOLS = [
     {
+        "key": "rapsodo",
+        "title": "Moeller Rapsodo",
+        "category": "players",
+        "desc": "Bullpen pitch quality from the Rapsodo unit -- location, movement, "
+                "arm slot, and same-level percentile rankings. Updates itself every "
+                "morning from the nightly pull.",
+        "url": "https://rapsodo-app-production.up.railway.app/",
+        "icon": '<circle cx="12" cy="12" r="10"/>'
+                '<path d="M7 15c2-5 8-5 10-9"/>'
+                '<circle cx="8.5" cy="9" r="1.2"/><circle cx="15.5" cy="15" r="1.2"/>',
+    },
+    {
         "key": "scouting",
         "title": "Scouting Agent",
         "category": "prep",

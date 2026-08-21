@@ -436,7 +436,8 @@ def tool_metric_history(player, metric_key):
             "sessions": series[-20:]}
 
 
-def tool_compare_windows(player, metric_key, recent_sessions=3, baseline_days=120):
+def tool_compare_windows(player, metric_key, recent_sessions=3, baseline_days=120,
+                         pitch_type=None):
     """An arbitrary two-window comparison, computed in SQL and arithmetic --
     not by the model doing statistics in its head."""
     import changes as C
@@ -451,13 +452,26 @@ def tool_compare_windows(player, metric_key, recent_sessions=3, baseline_days=12
     with engine.connect() as conn:
         obs = C._observations(conn, row.id)
         baseline_ids = C._baseline_sessions(conn, row.id)
-    if metric_key not in obs:
-        return {"player": f"{row.first_name} {row.last_name}",
-                "note": f"no {metric_key} data for this player"}
-    v = C.evaluate_metric(obs[metric_key], M.get(metric_key), baseline_ids,
+    # Observations are keyed by (metric, pitch type): a fastball's ride and a
+    # slider's are different measurements, not two samples of one.
+    rows, resolved = C.observations_for(obs, metric_key, pitch_type)
+    if not rows:
+        available = C.available_pitch_types(obs, metric_key)
+        note = f"no {metric_key} data for this player"
+        if pitch_type and available:
+            note = (f"no {metric_key} data for {pitch_type}; "
+                    f"tracked pitches: {', '.join(available)}")
+        return {"player": f"{row.first_name} {row.last_name}", "note": note}
+    v = C.evaluate_metric(rows, M.get(metric_key), baseline_ids,
                           k=int(recent_sessions), baseline_days=int(baseline_days))
     v.pop("gates", None)
     v["player"] = f"{row.first_name} {row.last_name}"
+    if resolved:
+        v["pitch_type"] = resolved
+        v["scope"] = f"{M.PITCH_TYPE_LABELS.get(resolved, resolved)} only"
+        if pitch_type is None:
+            v["note"] = (f"{metric_key} is pitch-specific; showing his most-thrown "
+                         f"pitch ({resolved}). Pass pitch_type for another.")
     return v
 
 

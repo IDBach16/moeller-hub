@@ -151,6 +151,36 @@ _HITTING = [
 REGISTRY = {m.key: m for m in (_PITCHING + _HITTING)}
 
 
+# ---------------------------------------------------------------------------
+# Which metrics only mean something for ONE pitch type
+# ---------------------------------------------------------------------------
+# Pooling a fastball's 15" of ride with a slider's 2" gives a number that moves
+# whenever the pitcher's MIX moves, even though no individual pitch changed. That
+# is a false alarm, not a finding -- and a costly one, because it looks exactly
+# like a real decline.
+#
+# Observed on Seth Maybury (2026-02-24): sliders went from 7% to 28% of his work.
+# Pooled, that read as "spin efficiency down 17.5 points, SIGNIFICANT" and "velocity
+# down 2.7 mph". Per pitch type his fastball was flat (velo -0.1, IVB +0.3) and his
+# slider efficiency had actually IMPROVED (+3.5).
+#
+# Release point is deliberately NOT in here: slot is a property of the delivery,
+# not of a pitch, and a real slot change shows up across every pitch at once --
+# which is exactly what Maybury's did (FB +1.16, SL +1.37, CH +2.04 ft).
+PITCH_SPECIFIC = {
+    "velocity",
+    "spin_rate",
+    "induced_vertical_break",
+    "horizontal_break",
+    "spin_efficiency",
+}
+
+
+def is_pitch_specific(key):
+    """True if this metric must be compared within a single pitch type."""
+    return key in PITCH_SPECIFIC
+
+
 def get(key):
     return REGISTRY.get(key)
 
@@ -188,8 +218,14 @@ PITCH_TYPE_LABELS = {
 }
 
 _PITCH_ALIASES = {
-    "FB": ["fastball", "four seam", "four-seam", "4-seam", "4 seam", "ff", "fa", "fb"],
-    "SI": ["sinker", "two seam", "two-seam", "2-seam", "2 seam", "ft", "si"],
+    # "fast ball" / "two seam fast ball" are how the AWRE season export spells them.
+    # Note "breaking ball" is deliberately absent: it covers 4,074 tracked pitches
+    # that could be a slider or a curveball, and there is no way to tell after the
+    # fact. It resolves to None and lands in QC rather than being guessed into one.
+    "FB": ["fastball", "fast ball", "four seam", "four-seam", "4-seam", "4 seam",
+           "ff", "fa", "fb"],
+    "SI": ["sinker", "two seam", "two-seam", "2-seam", "2 seam",
+           "two seam fast ball", "two seam fastball", "ft", "si"],
     "CT": ["cutter", "cut fastball", "fc", "ct"],
     "SL": ["slider", "sweeper", "sl", "st"],
     "CB": ["curveball", "curve", "knuckle curve", "cu", "kc", "cb"],

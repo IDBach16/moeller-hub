@@ -396,7 +396,10 @@ tr:last-child td{border-bottom:none}
     <a href="/team"{% if nav=='team' %} class="active"{% endif %}>Team Development</a>
     <a href="/prep"{% if nav=='prep' %} class="active"{% endif %}>Game Prep</a>
     <a href="/video"{% if nav=='video' %} class="active"{% endif %}>Video</a>
-    <a href="/collect"{% if nav=='collect' %} class="active"{% endif %}>Data Collection</a>
+    {# Data Collection is off the nav (Ian, 2026-08-19). The /collect route still
+       works if you go straight to it -- it holds the name-review queue -- but the
+       roster now comes from the school's roster pages, so coaches have no reason
+       to land there. #}
     <a href="/tools"{% if nav=='tools' %} class="active"{% endif %}>Tools</a>
   </div>
 </nav>

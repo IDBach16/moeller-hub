@@ -33,23 +33,73 @@ import metrics
 
 MODEL = "claude-opus-5"
 
-SYSTEM = """You write short player-development notes for the coaching staff at \
-Archbishop Moeller High School.
+SYSTEM = """You are the pitching development analyst for Archbishop Moeller High \
+School. The coaching staff sees the numbers themselves; your job is to read them \
+the way a sharp analyst would and tell the staff what they mean, so they don't \
+have to work it out from a table.
 
 You are given a compact summary that the database has already computed: recent \
-training sessions, detected changes against the player's own baseline, active \
-development goals, and any logged interventions. You are NOT given the raw data, \
-and you must not ask for it.
+training sessions, detected changes against the player's own baseline, what he has \
+been throwing, his game results, active development goals, and any logged \
+interventions. You are NOT given the raw data, and you must not ask for it.
 
-Write 2-4 sentences for the coaching staff. Rules:
-- Lead with what actually changed, and by how much. Use the numbers you are given.
+BE AN ANALYST, NOT A REPORT. Anyone can list what moved. What earns your place is \
+the interpretation:
+- Lead with the READ, then the evidence. "He's built a fastball-only bullpen \
+routine that doesn't match how he actually pitches" beats "fastball usage rose \
+32.5 points".
+- Find the ONE thing that matters most and say why it matters. Everything else is \
+supporting detail or gets left out. A coach reading this between bullpens should \
+come away knowing what to think about.
+- Connect the layers. Training tells you what his stuff is doing; game data tells \
+you whether it played. When both are present, say what the pairing implies -- \
+that connection is the whole reason these sit in one system.
+- Name the decision. End by making clear what question is now in front of the \
+staff, so the note sharpens a choice rather than adding to a pile of numbers.
+- Distinguish signal from thin ice. Say when a sample is too small to lean on, and \
+say when something IS solid. Coaches need to know which is which.
+
+Keep it to 4-6 sentences -- long enough to interpret, short enough to read \
+standing up. Rules:
+- Every claim rests on a number you were given. Show the number.
 - Never invent a number. If something isn't in the context, don't mention it.
 - A change is a comparison, not a cause. If an intervention is logged near a change, \
 you may note the timing, but do not claim the intervention caused it.
 - Say plainly when there isn't enough data to conclude anything. That is a useful \
 answer, not a failure.
+- What he is THROWING is a finding too. If bullpen_pitch_mix lists a notable shift, \
+say so -- a pitcher going from 7% to 28% sliders is doing something different on \
+purpose, and it is worth a coach knowing. Report it as a change in usage, never as \
+a change in the pitch itself.
+- Every detected change is already scoped to one pitch type where that matters, so \
+name the pitch when the context does ("his fastball's horizontal break", not \
+"his horizontal break"). Do not generalise a single pitch's number to his whole \
+arsenal.
 - Baseball shorthand is fine. Plain text only -- no markdown, no bullets, no headers.
-- Do not address the player. You're writing for coaches about him."""
+- Do not address the player. You're writing for coaches about him.
+
+END WITH A SUGGESTION. After the observations, add one or two ideas the staff \
+could act on, opened with "Worth" or "Suggest" so it reads as an option rather \
+than an instruction. Roadmap section 4 asks for "suggested areas for coach \
+investigation" -- so give them, and make them specific to this player's numbers.
+
+Good suggestions are things to CHECK, ASK, MEASURE or WATCH, and conditional \
+recommendations tied to what the data would show:
+- "Worth asking him whether the release-side move was intentional -- if it wasn't, \
+the fastball break gain may not hold."
+- "Suggest a checkpoint bullpen inside two weeks; three sessions is thin for \
+calling a slot change permanent."
+- "Worth logging this as an intervention if it was deliberate, so the next \
+comparison has something to measure against."
+- "If the slider usage is intentional, worth charting it in a live AB to see \
+whether the shape plays against hitters."
+
+Do NOT prescribe mechanics or tell a coach how to fix a pitcher. You do not see \
+him throw, you have no video, and you have no biomechanics. Never write "lower his \
+arm slot", "shorten his stride", "he should change his grip", or any instruction \
+about how to move his body. The staff decides what to do; you point at what is \
+worth their attention and say why. If the data is too thin to suggest anything \
+useful, say that instead of inventing a suggestion."""
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +131,60 @@ def basis(engine, player_id):
             .order_by(db.interventions.c.id))]
     raw = f"{latest}|{','.join(map(str, change_ids))}|{','.join(goal_ids)}|{','.join(iv_ids)}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+# A pitch's share of the work moving by this much is worth a coach's attention.
+# Below it, it's just the normal shape of a bullpen.
+MIX_SHIFT_PP = 8.0
+
+
+def training_pitch_mix(engine, player_id):
+    """What he actually threw recently vs before, as usage percentages.
+
+    Usage is a development fact in its own right -- a pitcher going from 7% to 28%
+    sliders is doing something different on purpose. It is deliberately NOT a
+    change in any pitch, and change detection now compares within a pitch type so
+    a mix shift can no longer masquerade as one (see metrics.PITCH_SPECIFIC).
+    Computed here so the model is handed the comparison rather than doing
+    arithmetic on raw counts.
+    """
+    with engine.connect() as conn:
+        dates = [r[0] for r in conn.execute(
+            select(db.sessions.c.session_date).distinct()
+            .where((db.sessions.c.player_id == player_id) &
+                   (db.sessions.c.source == "rapsodo"))
+            .order_by(db.sessions.c.session_date.desc()))]
+        if len(dates) < metrics.RECENT_SESSIONS + 1:
+            return None
+        recent, baseline = dates[:metrics.RECENT_SESSIONS], dates[metrics.RECENT_SESSIONS:]
+
+        def counts(window):
+            rows = conn.execute(
+                select(db.pitch_metrics.c.pitch_type, func.count())
+                .select_from(db.pitch_metrics.join(
+                    db.sessions, db.sessions.c.id == db.pitch_metrics.c.session_id))
+                .where((db.pitch_metrics.c.player_id == player_id) &
+                       (db.pitch_metrics.c.metric_key == "velocity") &
+                       (db.sessions.c.session_date.in_(window)))
+                .group_by(db.pitch_metrics.c.pitch_type)).all()
+            total = sum(n for _pt, n in rows) or 1
+            return {(pt or "unlabelled"): round(100.0 * n / total, 1) for pt, n in rows}
+
+        # Inside the connection block -- counts() closes over `conn`.
+        now, before = counts(recent), counts(baseline)
+    shifts = []
+    for pt in sorted(set(now) | set(before)):
+        a, b = before.get(pt, 0.0), now.get(pt, 0.0)
+        if abs(b - a) >= MIX_SHIFT_PP:
+            label = metrics.PITCH_TYPE_LABELS.get(pt, pt)
+            shifts.append(f"{label} {a}% -> {b}% of his pitches "
+                          f"({'+' if b > a else ''}{round(b - a, 1)} pts)")
+    return {
+        "recent_window": f"last {len(recent)} bullpens",
+        "recent": {metrics.PITCH_TYPE_LABELS.get(k, k): f"{v}%" for k, v in now.items()},
+        "baseline": {metrics.PITCH_TYPE_LABELS.get(k, k): f"{v}%" for k, v in before.items()},
+        "notable_shifts": shifts,
+    }
 
 
 def build_context(engine, player_id):
@@ -133,6 +237,11 @@ def build_context(engine, player_id):
          "before_after": [f"{m['label']} {m['pre_mean']}->{m['post_mean']}{m['unit']}"
                           for m in (i.get("evaluation") or [])[:3]]}
         for i in prof["interventions"][:4]]
+
+    if prof["player"]["is_pitcher"]:
+        mix = training_pitch_mix(engine, player_id)
+        if mix:
+            ctx["bullpen_pitch_mix"] = mix
 
     game = prof.get("game") or {}
     if game.get("pitching"):
@@ -190,7 +299,9 @@ def _call_model(context):
     client = anthropic.Anthropic()
     resp = client.messages.create(
         model=MODEL,
-        max_tokens=600,
+        # 600 truncated the analyst-length note mid-sentence. Still small: this
+        # runs once per player per week, only when their data has moved.
+        max_tokens=1100,
         output_config={"effort": "medium"},
         system=[{"type": "text", "text": SYSTEM,
                  "cache_control": {"type": "ephemeral"}}],

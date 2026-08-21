@@ -136,23 +136,63 @@ def welch(a, b):
 # ===========================================================================
 
 def _observations(conn, player_id):
-    """Every measurement for a player, as {metric_key: [(date, session_id, value)]}.
+    """Every measurement for a player, as {(metric_key, pitch_type): [(date, session_id, value)]}.
+
+    `pitch_type` is None for metrics that are meaningfully pooled (release point,
+    everything on the hitting side) and the pitch code for those that are not.
+    Comparing a fastball's ride against a slider's is comparing two different
+    measurements, and the pooled average then moves whenever usage moves --
+    see metrics.PITCH_SPECIFIC for the case that made this necessary.
 
     Both sides are read; a two-way player has swings and pitches, and the metric
     registry already knows which is which.
     """
     out = {}
     for table in (db.swings, db.pitch_metrics):
+        has_pt = table is db.pitch_metrics
+        cols = [db.sessions.c.session_date, db.sessions.c.id,
+                table.c.metric_key, table.c.value]
+        if has_pt:
+            cols.append(table.c.pitch_type)
         rows = conn.execute(
-            select(db.sessions.c.session_date, db.sessions.c.id,
-                   table.c.metric_key, table.c.value)
+            select(*cols)
             .select_from(db.sessions.join(table, table.c.session_id == db.sessions.c.id))
             .where((db.sessions.c.player_id == player_id) & (table.c.value.isnot(None)))
             .order_by(db.sessions.c.session_date)).all()
         for r in rows:
-            out.setdefault(r.metric_key, []).append(
+            if has_pt and metrics.is_pitch_specific(r.metric_key):
+                # An unlabelled pitch can't be attributed to an arsenal slot, so
+                # it contributes to nothing rather than polluting a real one.
+                if not r.pitch_type:
+                    continue
+                key = (r.metric_key, r.pitch_type)
+            else:
+                key = (r.metric_key, None)
+            out.setdefault(key, []).append(
                 (r.session_date, r.id, float(r.value)))
     return out
+
+
+def observations_for(obs, metric_key, pitch_type=None):
+    """Pick one series out of _observations(), which is keyed by (metric, pitch).
+
+    Returns (rows, resolved_pitch_type). For a pitch-specific metric asked for
+    without a pitch, this resolves to the slot he throws most rather than pooling
+    incomparable pitches -- and tells the caller which one it picked, so nothing
+    reports a fastball number as though it covered the whole arsenal.
+    """
+    if (metric_key, pitch_type) in obs:
+        return obs[(metric_key, pitch_type)], pitch_type
+    if pitch_type is None:
+        candidates = {k[1]: v for k, v in obs.items() if k[0] == metric_key}
+        if candidates:
+            best = max(candidates.items(), key=lambda kv: len(kv[1]))
+            return best[1], best[0]
+    return [], pitch_type
+
+
+def available_pitch_types(obs, metric_key):
+    return sorted(k[1] for k in obs if k[0] == metric_key and k[1])
 
 
 def _baseline_sessions(conn, player_id):
@@ -178,7 +218,7 @@ def _as_date(v):
 # ===========================================================================
 
 def evaluate_metric(observations, metric, baseline_session_ids=(),
-                    k=None, baseline_days=None):
+                    k=None, baseline_days=None, pitch_type=None):
     """Compare a recent window with a prior baseline for one metric.
 
     Returns a verdict dict whether or not it fires, so the caller can explain
@@ -264,7 +304,7 @@ def evaluate_metric(observations, metric, baseline_session_ids=(),
                            if abs(effect) >= metrics.SIGNIFICANT_EFFECT
                            and p < metrics.SIGNIFICANT_P else "notable")
     verdict["favorable"] = favorable(metric, bm, rm)
-    verdict["summary"] = summarize(metric, rm, bm, delta, len(recent_ids))
+    verdict["summary"] = summarize(metric, rm, bm, delta, len(recent_ids), pitch_type)
     return verdict
 
 
@@ -288,15 +328,22 @@ def favorable(metric, baseline_mean, recent_mean):
     return None
 
 
-def summarize(metric, recent_mean, baseline_mean, delta, n_sessions):
+def summarize(metric, recent_mean, baseline_mean, delta, n_sessions, pitch_type=None):
     """The one plain-English line stored on the row.
 
     This is the compact context the roadmap's section 9 example asks for -- what
-    the agent reads instead of the underlying pitches.
+    the agent reads instead of the underlying pitches. The pitch type is named
+    when there is one, because "induced vertical break is down" reads as a
+    problem with the pitcher while "his changeup's induced vertical break is
+    down" is the thing a coach can actually act on.
     """
     fmt = metrics.format_value
     sign = "+" if delta > 0 else ""
-    return (f"{metric.label} {fmt(metric.key, recent_mean)} vs "
+    what = metric.label
+    if pitch_type:
+        label = metrics.PITCH_TYPE_LABELS.get(pitch_type, pitch_type)
+        what = f"{label} {metric.label[0].lower()}{metric.label[1:]}"
+    return (f"{what} {fmt(metric.key, recent_mean)} vs "
             f"{fmt(metric.key, baseline_mean)} baseline "
             f"({sign}{fmt(metric.key, delta)} {metric.unit}) "
             f"over {n_sessions} session{'' if n_sessions == 1 else 's'}")
@@ -316,25 +363,30 @@ def compute_player(engine, player_id, write=True, explain=False):
         already = {}
         for r in conn.execute(
                 select(db.change_events.c.metric_key,
+                       db.change_events.c.pitch_type,
                        func.max(db.change_events.c.detected_on).label("last"))
                 .where(db.change_events.c.player_id == player_id)
-                .group_by(db.change_events.c.metric_key)):
-            already[r.metric_key] = _as_date(r.last)
+                .group_by(db.change_events.c.metric_key,
+                          db.change_events.c.pitch_type)):
+            already[(r.metric_key, r.pitch_type)] = _as_date(r.last)
 
     verdicts = []
-    for key, rows in obs.items():
+    for (key, pitch_type), rows in obs.items():
         metric = metrics.get(key)
         if metric is None:
             continue                     # stored but not registered -- not surfaced
-        v = evaluate_metric(rows, metric, baseline_ids)
+        v = evaluate_metric(rows, metric, baseline_ids, pitch_type=pitch_type)
         v["player_id"] = player_id
+        v["pitch_type"] = pitch_type
         verdicts.append(v)
 
     fired = []
     for v in verdicts:
         if v.get("status") != "change":
             continue
-        last = already.get(v["metric_key"])
+        # Suppression is per pitch as well: a fastball finding must not silence a
+        # slider one for the same metric.
+        last = already.get((v["metric_key"], v.get("pitch_type")))
         if last is not None and last >= _as_date(v["window_start"]):
             v["status"] = "suppressed"
             v["reason"] = f"already reported on {last} for an overlapping window"
@@ -346,6 +398,7 @@ def compute_player(engine, player_id, write=True, explain=False):
             for v in fired:
                 conn.execute(insert(db.change_events).values(
                     player_id=player_id, metric_key=v["metric_key"],
+                    pitch_type=v.get("pitch_type"),
                     detected_on=_as_date(v["window_end"]),
                     direction=v["direction"], recent_mean=v["recent_mean"],
                     baseline_mean=v["baseline_mean"], delta=v["delta"],
@@ -370,12 +423,15 @@ def _store_baseline(conn, player_id, verdict):
     combined = ((verdict["recent_mean"] * verdict["n_recent"] +
                  verdict["baseline_mean"] * verdict["n_baseline"]) / n) if n else None
     end = _as_date(verdict["window_end"])
+    # '' rather than NULL for the pooled case -- see db.player_baselines.
+    pt = verdict.get("pitch_type") or ""
     conn.execute(delete(db.player_baselines).where(
         (db.player_baselines.c.player_id == player_id) &
         (db.player_baselines.c.metric_key == verdict["metric_key"]) &
+        (db.player_baselines.c.pitch_type == pt) &
         (db.player_baselines.c.window_end == end)))
     conn.execute(insert(db.player_baselines).values(
-        player_id=player_id, metric_key=verdict["metric_key"],
+        player_id=player_id, metric_key=verdict["metric_key"], pitch_type=pt,
         window_end=end, window_start=_as_date(verdict["baseline_start"]),
         n=n, mean=combined, sd=verdict.get("baseline_sd")))
 
@@ -450,7 +506,7 @@ def evaluate_intervention(engine, intervention_id, write=True):
     start = when - timedelta(days=PRE_WINDOW_DAYS)
 
     results = []
-    for key, rows in obs.items():
+    for (key, pitch_type), rows in obs.items():
         metric = metrics.get(key)
         if metric is None:
             continue
@@ -465,8 +521,13 @@ def evaluate_intervention(engine, intervention_id, write=True):
         t, dfree = welch(post, pre)
         p = t_test_p(t, dfree)
         moved = abs(delta) >= metric.mmc and abs(effect) >= metrics.MIN_EFFECT_SIZE
+        label = metric.label
+        if pitch_type:
+            label = (f"{metrics.PITCH_TYPE_LABELS.get(pitch_type, pitch_type)} "
+                     f"{metric.label[0].lower()}{metric.label[1:]}")
         results.append({
-            "metric_key": key, "label": metric.label, "unit": metric.unit,
+            "metric_key": key, "pitch_type": pitch_type,
+            "label": label, "unit": metric.unit,
             "is_goal_metric": key == goal_metric,
             "pre_mean": round(pm, metric.decimals), "post_mean": round(qm, metric.decimals),
             "delta": round(delta, metric.decimals), "effect_size": round(effect, 3),

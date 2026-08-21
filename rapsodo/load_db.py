@@ -62,6 +62,21 @@ PITCH_METRIC_MAP = {
     "spinEfficiency": "spin_efficiency",
     "releaseHeight": "release_height",
     "releaseSide": "release_side",
+    # Where it crossed the plate. Not registry metrics -- there's no "better" or
+    # "worse" plate location in the abstract, so they exist to be plotted, not
+    # trended. Without them the card can't show a strike-zone chart, which is the
+    # plot a pitching coach reads first.
+    "strikeZoneX": "plate_side",
+    "strikeZoneY": "plate_height",
+    # For the Rapsodo app's percentile and movement views. Not registry metrics:
+    # they describe a pitch rather than judging it, so there is no "better".
+    "trueSpin": "true_spin",          # the part of the spin that actually moves it
+    "spinAxisDegree": "spin_axis",    # degrees; rendered as clock tilt in the app
+    "gyroDegree": "gyro_degree",
+    "totalBreak": "total_break",
+    # Boolean, stored 1/0. The device's own zone call -- a location check, not a
+    # competition strike rate.
+    "isStrike": "is_strike",
 }
 
 # 0 and 4 were confirmed by reproducing the Rapsodo UI's own per-type averages
