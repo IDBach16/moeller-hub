@@ -606,25 +606,11 @@ def create_app():
             return jsonify({"error": WRITES_OFF}), 403
         force = bool((request.get_json(silent=True) or {}).get("force"))
         try:
-            return jsonify(summaries.generate(engine, player_id, force=force))
+            res = summaries.generate(engine, player_id, force=force)
+            res["parsed"] = summaries.parse_note(res.get("summary"))
+            return jsonify(res)
         except Exception as e:
             return jsonify({"error": f"Could not write a summary: {e}"}), 500
-
-    @app.route("/api/players/<int:player_id>/headline")
-    def api_headline(player_id):
-        """The one-line analyst read under the name. Served from cache when the
-        player's data hasn't moved; generated (one small call) when it has --
-        the page loads instantly and this fills in behind it."""
-        import summaries
-        engine = _engine()
-        try:
-            if writes_enabled():
-                return jsonify(summaries.generate_headline(engine, player_id))
-            hit = summaries.cached(
-                engine, player_id, "hl-" + summaries.basis(engine, player_id)[:32])
-            return jsonify(hit or {"summary": None, "note": "no current headline"})
-        except Exception as e:                              # noqa: BLE001
-            return jsonify({"summary": None, "error": str(e)}), 500
 
     @app.route("/api/summaries/weekly", methods=["POST"])
     def api_weekly_summaries():

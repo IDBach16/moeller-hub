@@ -85,11 +85,47 @@
 .good{color:#8fd9a4}
 .bad{color:#e79a9a}
 
-/* the one-line analyst read under the name */
-.analyst-line{margin-top:.6rem;max-width:64ch;font-size:.95rem;line-height:1.5;
-  color:var(--gold-light);border-left:2px solid var(--gold);padding-left:.7rem;
-  opacity:0;transition:opacity .4s}
-.analyst-line.on{opacity:1}
+/* per-pitch header strip: parent = the pitch, children = its variables */
+.arsenal{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1rem}
+.apitch{background:var(--glass);border:1px solid var(--glass-border);
+  border-top:3px solid var(--pt-UNK);border-radius:9px;
+  padding:.55rem .8rem .65rem;min-width:158px}
+.ap-head{display:flex;align-items:center;font-size:.84rem;font-weight:700}
+.ap-head .rap-sw{margin-right:.45rem}
+.ap-use{margin-left:auto;padding-left:.7rem;font-weight:400;
+  font-family:ui-monospace,Consolas,monospace;font-size:.72rem;
+  color:rgba(255,255,255,.55)}
+.ap-vars{display:grid;grid-template-columns:1fr 1fr;gap:.18rem .9rem;
+  margin:.5rem 0 0}
+.ap-vars div{display:flex;justify-content:space-between;gap:.5rem;
+  align-items:baseline}
+.ap-vars dt{font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;
+  color:rgba(255,255,255,.4)}
+.ap-vars dd{margin:0;font-family:ui-monospace,Consolas,monospace;
+  font-size:.74rem;color:rgba(255,255,255,.88)}
+
+/* ===== structured development note ===== */
+.note-read{font-size:1rem;line-height:1.55;color:var(--gold-light);
+  border-left:2px solid var(--gold);padding-left:.8rem;margin:0 0 1rem}
+.note-f{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.55rem}
+.note-f li{font-size:.87rem;line-height:1.55;color:rgba(255,255,255,.85);
+  border-left:3px solid rgba(255,255,255,.15);padding-left:.7rem}
+.note-f li.good{border-color:#8fd9a4}
+.note-f li.bad{border-color:#e79a9a}
+.note-groups{display:flex;flex-direction:column;gap:.9rem}
+.note-gh{display:flex;align-items:center;gap:.45rem;margin-bottom:.4rem;
+  font-size:.68rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:rgba(255,255,255,.55)}
+.note-gh .rap-sw{margin-right:0}
+.note-watch{margin-top:1rem;background:var(--gold-dim);
+  border:1px solid rgba(197,165,90,.25);border-radius:8px;padding:.7rem .95rem}
+.note-watch h3{margin:0 0 .4rem;font-size:.68rem;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--gold)}
+.note-watch ul{margin:0;padding-left:1.1rem}
+.note-watch li{font-size:.85rem;line-height:1.5;color:rgba(255,255,255,.85);
+  margin:.3rem 0}
+.note-caveat{margin:.8rem 0 0;font-size:.78rem;font-style:italic;
+  color:rgba(255,255,255,.5)}
 
 /* ===== Rapsodo report card ===== */
 /* Pitch-type hues are the dark-surface steps validated for colour-blind
@@ -170,14 +206,109 @@
         {%- if p.last_session %} &middot; Last session {{ p.last_session }}
         {%- else %} &middot; <span class="muted">no training sessions on record</span>{% endif %}
       </div>
-      {% if p.player.is_pitcher and p.training %}
-      <p class="analyst-line" id="analystLine" data-pid="{{ p.player.id }}"></p>
+      {% if p.player.is_pitcher and card and card.has_data %}
+      {# The coach's header: one box per pitch, its numbers underneath. Straight
+         from the Rapsodo data -- nothing here is AI-generated. #}
+      <div class="arsenal">
+        {# Real pitches only -- a couple of untagged or mis-tagged pitches
+           shouldn't put a card in the coach's header. The full table below
+           still lists everything. #}
+        {% for a in card.arsenal if a.pt != 'UNK' and a.n >= 3 %}
+        <div class="apitch" style="border-top-color:var(--pt-{{ a.pt }})">
+          <div class="ap-head">
+            <span class="rap-sw" data-pt="{{ a.pt }}"></span>{{ a.label }}
+            <span class="ap-use">{{ a.usage }}%</span>
+          </div>
+          <dl class="ap-vars">
+            <div><dt>Velo</dt><dd>{{ a.velo if a.velo is not none else '&mdash;'|safe }}</dd></div>
+            <div><dt>Max</dt><dd>{{ a.max if a.max is not none else '&mdash;'|safe }}</dd></div>
+            <div><dt>Spin</dt><dd>{{ a.spin|round|int if a.spin is not none else '&mdash;'|safe }}</dd></div>
+            <div><dt>Eff</dt><dd>{% if a.eff is not none %}{{ a.eff|round|int }}%{% else %}&mdash;{% endif %}</dd></div>
+            <div><dt>IVB</dt><dd>{{ a.ivb if a.ivb is not none else '&mdash;'|safe }}</dd></div>
+            <div><dt>HB</dt><dd>{{ a.hb if a.hb is not none else '&mdash;'|safe }}</dd></div>
+          </dl>
+        </div>
+        {% endfor %}
+      </div>
       {% endif %}
     </div>
     <div class="spacer"></div>
     <a href="/players" class="btn ghost">&larr; Roster</a>
   </div>
   <p class="page-sub"></p>
+
+  <!-- ============ 9. AI SUMMARY -- first thing a coach reads ============ -->
+  <section class="panel">
+    <h2>AI summary</h2>
+    <p class="hint">
+      Written from the changes and goals the database already computed &mdash; not from
+      the raw data &mdash; and cached until this player&rsquo;s data moves.
+    </p>
+    <div id="sumBox">
+      {% set note = p.ai_summary.note if p.ai_summary else none %}
+      {% if note %}
+        <p class="note-read">{{ note.read }}</p>
+        {% if note.findings %}
+        {# Parent -> children, same structure as the header: the parent is the
+           pitch (or the delivery / mix / game layer), the children are its
+           variables. #}
+        {% set PT_NAMES = {'FB':'Fastball','SI':'Sinker','CT':'Cutter',
+                           'SL':'Slider','CB':'Curveball','CH':'Changeup',
+                           'SP':'Splitter','DELIVERY':'Delivery',
+                           'MIX':'Usage mix','GAME':'Game results'} %}
+        <div class="note-groups">
+          {% for grp in note.findings %}
+          <div class="note-g">
+            <div class="note-gh">
+              {% if grp.parent in ['FB','SI','CT','SL','CB','CH','SP'] %}
+              <span class="rap-sw" data-pt="{{ grp.parent }}"></span>
+              {% endif %}
+              {{ PT_NAMES.get(grp.parent, grp.parent) }}
+            </div>
+            <ul class="note-f">
+              {% for f in grp['items'] %}
+              <li class="{{ f.tone }}">{{ f.text }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if note.watch %}
+        <div class="note-watch">
+          <h3>Worth checking</h3>
+          <ul>{% for w in note.watch %}<li>{{ w }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
+        {% if note.caveat %}<p class="note-caveat">{{ note.caveat }}</p>{% endif %}
+        <div class="prog-note muted" style="margin-top:.7rem">
+          Written {{ p.ai_summary.created_at[:16] }}
+          {%- if p.ai_summary.model %} by {{ p.ai_summary.model }}{% endif %}
+          &middot; still current for this player&rsquo;s data
+        </div>
+      {% elif p.ai_summary and p.ai_summary.summary %}
+        {# a note written before the structured format -- plain paragraph #}
+        <p style="font-size:.92rem;line-height:1.7">{{ p.ai_summary.summary }}</p>
+        <div class="prog-note muted" style="margin-top:.7rem">
+          Written {{ p.ai_summary.created_at[:16] }}
+          {%- if p.ai_summary.model %} by {{ p.ai_summary.model }}{% endif %}
+          &middot; still current for this player&rsquo;s data
+        </div>
+      {% else %}
+        <p class="empty" style="padding:0">
+          No summary written yet. The weekly job writes one for every player whose data
+          moved that week; you can also write one now.
+        </p>
+      {% endif %}
+    </div>
+    <div class="btn-row">
+      <button class="btn ghost" id="sumBtn"
+        {% if not writes_enabled %}disabled{% endif %}>
+        {% if p.ai_summary and p.ai_summary.summary %}Rewrite{% else %}Write one now{% endif %}
+      </button>
+      <span class="muted" id="sumMsg"></span>
+    </div>
+  </section>
 
   <!-- ============ 2. CURRENT STATUS ============ -->
   {% if p.status %}
@@ -662,51 +793,19 @@
     </section>
   </div>
 
-  <!-- ============ 6. VIDEO + 9. AI SUMMARY ============ -->
-  <div class="sec-split">
-    <section class="panel">
-      <h2>Video evidence</h2>
-      <p class="hint">Clips tied to sessions and detected changes.</p>
-      <div class="blocked">
-        <strong>Not wired up yet.</strong> Attaching clips to a specific pitch or change
-        needs a stable per-pitch clip address from AWRE, which hasn't been worked out.
-        Until then this links out to the video search.
-        <div style="margin-top:.9rem">
-          <a class="btn" href="{{ p.video_search_url }}" target="_blank">Open AWRE Video Search</a>
-        </div>
+  <!-- ============ 6. VIDEO ============ -->
+  <section class="panel">
+    <h2>Video evidence</h2>
+    <p class="hint">Clips tied to sessions and detected changes.</p>
+    <div class="blocked">
+      <strong>Not wired up yet.</strong> Attaching clips to a specific pitch or change
+      needs a stable per-pitch clip address from AWRE, which hasn't been worked out.
+      Until then this links out to the video search.
+      <div style="margin-top:.9rem">
+        <a class="btn" href="{{ p.video_search_url }}" target="_blank">Open AWRE Video Search</a>
       </div>
-    </section>
-
-    <section class="panel">
-      <h2>AI summary</h2>
-      <p class="hint">
-        Written from the changes and goals the database already computed &mdash; not from
-        the raw data &mdash; and cached until this player&rsquo;s data moves.
-      </p>
-      <div id="sumBox">
-        {% if p.ai_summary and p.ai_summary.summary %}
-          <p style="font-size:.92rem;line-height:1.7">{{ p.ai_summary.summary }}</p>
-          <div class="prog-note muted" style="margin-top:.7rem">
-            Written {{ p.ai_summary.created_at[:16] }}
-            {%- if p.ai_summary.model %} by {{ p.ai_summary.model }}{% endif %}
-            &middot; still current for this player&rsquo;s data
-          </div>
-        {% else %}
-          <p class="empty" style="padding:0">
-            No summary written yet. The weekly job writes one for every player whose data
-            moved that week; you can also write one now.
-          </p>
-        {% endif %}
-      </div>
-      <div class="btn-row">
-        <button class="btn ghost" id="sumBtn"
-          {% if not writes_enabled %}disabled{% endif %}>
-          {% if p.ai_summary and p.ai_summary.summary %}Rewrite{% else %}Write one now{% endif %}
-        </button>
-        <span class="muted" id="sumMsg"></span>
-      </div>
-    </section>
-  </div>
+    </div>
+  </section>
 
 </div>
 {% endblock %}
@@ -790,11 +889,8 @@ if(sumBtn) sumBtn.addEventListener('click', async () => {
   if(!ok){ msg.textContent = data.error || 'Could not write a summary.';
            sumBtn.disabled = false; return; }
   if(data.skipped){ msg.textContent = data.skipped; sumBtn.disabled = false; return; }
-  document.getElementById('sumBox').innerHTML =
-    '<p style="font-size:.92rem;line-height:1.7"></p>';
-  document.querySelector('#sumBox p').textContent = data.summary;
-  msg.textContent = data.cached ? 'Already current.' : 'Written.';
-  sumBtn.disabled = false;
+  // The note renders server-side (read / findings / watch); reload to show it.
+  location.reload();
 });
 
 document.querySelectorAll('.ivEval').forEach(b => b.addEventListener('click', async () => {
@@ -1016,17 +1112,6 @@ document.querySelectorAll('.ivEval').forEach(b => b.addEventListener('click', as
   });
 
   render();
-})();
-</script>
-
-<script>
-(function(){
-  const el = document.getElementById('analystLine');
-  if(!el) return;
-  fetch('/api/players/' + el.dataset.pid + '/headline')
-    .then(r => r.json())
-    .then(d => { if(d && d.summary){ el.textContent = d.summary; el.classList.add('on'); } })
-    .catch(function(){});
 })();
 </script>
 {% endblock %}

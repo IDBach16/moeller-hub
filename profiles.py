@@ -189,7 +189,12 @@ def _cached_summary(engine, player_id):
     """The stored development note, only if it is still current for this data."""
     try:
         import summaries
-        return summaries.cached(engine, player_id)
+        hit = summaries.cached(engine, player_id)
+        if hit:
+            # Structured notes render field-by-field; older prose notes leave
+            # this None and fall back to a plain paragraph.
+            hit["note"] = summaries.parse_note(hit["summary"])
+        return hit
     except Exception:
         return None
 

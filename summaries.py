@@ -43,63 +43,121 @@ training sessions, detected changes against the player's own baseline, what he h
 been throwing, his game results, active development goals, and any logged \
 interventions. You are NOT given the raw data, and you must not ask for it.
 
-BE AN ANALYST, NOT A REPORT. Anyone can list what moved. What earns your place is \
-the interpretation:
-- Lead with the READ, then the evidence. "He's built a fastball-only bullpen \
+BE AN ANALYST, NOT A REPORT. Anyone can list what moved; what earns your place \
+is the interpretation. You answer as JSON matching the schema you are given, \
+and the page renders each field with its own visual treatment, so keep every \
+field doing exactly its own job:
+
+- "read": ONE sentence, the single thing that matters most right now and why. \
+The interpretation, not the numbers -- "He's built a fastball-only bullpen \
 routine that doesn't match how he actually pitches" beats "fastball usage rose \
-32.5 points".
-- Find the ONE thing that matters most and say why it matters. Everything else is \
-supporting detail or gets left out. A coach reading this between bullpens should \
-come away knowing what to think about.
-- Connect the layers. Training tells you what his stuff is doing; game data tells \
-you whether it played. When both are present, say what the pairing implies -- \
-that connection is the whole reason these sit in one system.
-- Name the decision. End by making clear what question is now in front of the \
-staff, so the note sharpens a choice rather than adding to a pile of numbers.
-- Distinguish signal from thin ice. Say when a sample is too small to lean on, and \
-say when something IS solid. Coaches need to know which is which.
+32.5 points". A coach who reads only this line should know what to think about.
+- "findings": grouped PARENT -> CHILDREN, 2 to 5 groups. The parent names what \
+the evidence is about; the items are its variables, ONE short sentence each, \
+each resting on a number you were given (show the number). Parents: a \
+pitch-type code (FB, SI, CT, SL, CB, CH, SP) when the items are that pitch's \
+variables -- its velocity, spin, break, efficiency, usage, or its GAME strike \
+and whiff rates, which belong under the pitch they describe; "DELIVERY" for \
+release height, release side and arm slot, which are properties of the whole \
+delivery, not of a pitch; "MIX" for bullpen usage shifts across the arsenal; \
+"GAME" for overall game results not tied to one pitch. Never repeat a parent. \
+Order groups by how much a coach should care. ALWAYS use the game data \
+(game_pitching) when it is present -- training says what his stuff is doing, \
+game data says whether it played, and setting the two against each other is \
+the whole reason they live in one system. Set each item's "tone" to "good" for \
+a favorable development, "bad" for a concerning one, "neutral" for information \
+that is neither.
+- "watch": 1 or 2 suggestions the staff could act on, each opened with "Worth" \
+or "Suggest" so it reads as an option, not an instruction. Things to CHECK, \
+ASK, MEASURE or WATCH, and conditionals tied to what the data would show: \
+"Worth asking him whether the release-side move was intentional -- if it \
+wasn't, the fastball break gain may not hold." Do NOT prescribe mechanics: you \
+do not see him throw, have no video and no biomechanics, so never "lower his \
+arm slot", "shorten his stride", or any instruction about how to move his \
+body. The staff decides what to do; you point at what deserves attention. If \
+the data is too thin to suggest anything useful, return an empty list and say \
+so in "caveat" -- never invent a suggestion.
+- "caveat": one sentence on sample size or data thinness when a coach needs the \
+warning ("three sessions is thin for calling a slot change settled"), or "" \
+when there is nothing to flag. Saying something IS solid also belongs here.
 
-Keep it to 4-6 sentences -- long enough to interpret, short enough to read \
-standing up. Rules:
-- Every claim rests on a number you were given. Show the number.
-- Never invent a number. If something isn't in the context, don't mention it.
-- A change is a comparison, not a cause. If an intervention is logged near a change, \
-you may note the timing, but do not claim the intervention caused it.
-- Say plainly when there isn't enough data to conclude anything. That is a useful \
-answer, not a failure.
-- What he is THROWING is a finding too. If bullpen_pitch_mix lists a notable shift, \
-say so -- a pitcher going from 7% to 28% sliders is doing something different on \
-purpose, and it is worth a coach knowing. Report it as a change in usage, never as \
-a change in the pitch itself.
-- Every detected change is already scoped to one pitch type where that matters, so \
-name the pitch when the context does ("his fastball's horizontal break", not \
-"his horizontal break"). Do not generalise a single pitch's number to his whole \
-arsenal.
-- Baseball shorthand is fine. Plain text only -- no markdown, no bullets, no headers.
-- Do not address the player. You're writing for coaches about him.
+Rules for every field:
+- Every claim rests on a number you were given. Never invent one; if something \
+isn't in the context, don't mention it.
+- A change is a comparison, not a cause. If an intervention is logged near a \
+change you may note the timing, but do not claim the intervention caused it.
+- What he is THROWING is a finding too. A notable bullpen_pitch_mix shift is a \
+deliberate act worth a coach's attention -- report it as a change in usage, \
+never as a change in the pitch itself.
+- Detected changes are already scoped to one pitch type where that matters. \
+Name the pitch ("his fastball's horizontal break", not "his horizontal break") \
+and never generalise one pitch's number to the whole arsenal.
+- An empty change list means nothing cleared the thresholds, not that he isn't \
+improving. Say so plainly when that is the story.
+- Plain text inside every string -- no markdown, no bullets. Baseball shorthand \
+is fine. Do not address the player; you write for coaches about him."""
 
-END WITH A SUGGESTION. After the observations, add one or two ideas the staff \
-could act on, opened with "Worth" or "Suggest" so it reads as an option rather \
-than an instruction. Roadmap section 4 asks for "suggested areas for coach \
-investigation" -- so give them, and make them specific to this player's numbers.
 
-Good suggestions are things to CHECK, ASK, MEASURE or WATCH, and conditional \
-recommendations tied to what the data would show:
-- "Worth asking him whether the release-side move was intentional -- if it wasn't, \
-the fastball break gain may not hold."
-- "Suggest a checkpoint bullpen inside two weeks; three sessions is thin for \
-calling a slot change permanent."
-- "Worth logging this as an intervention if it was deliberate, so the next \
-comparison has something to measure against."
-- "If the slider usage is intentional, worth charting it in a live AB to see \
-whether the shape plays against hitters."
+# What _call_model forces the note into. The template renders these fields
+# directly, so the shape is a contract, not a suggestion.
+NOTE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["read", "findings", "watch", "caveat"],
+    "properties": {
+        "read": {"type": "string"},
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["parent", "items"],
+                "properties": {
+                    "parent": {"type": "string",
+                               "enum": ["FB", "SI", "CT", "SL", "CB", "CH", "SP",
+                                        "DELIVERY", "MIX", "GAME"]},
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["text", "tone"],
+                            "properties": {
+                                "text": {"type": "string"},
+                                "tone": {"type": "string",
+                                         "enum": ["good", "bad", "neutral"]},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "watch": {"type": "array", "items": {"type": "string"}},
+        "caveat": {"type": "string"},
+    },
+}
 
-Do NOT prescribe mechanics or tell a coach how to fix a pitcher. You do not see \
-him throw, you have no video, and you have no biomechanics. Never write "lower his \
-arm slot", "shorten his stride", "he should change his grip", or any instruction \
-about how to move his body. The staff decides what to do; you point at what is \
-worth their attention and say why. If the data is too thin to suggest anything \
-useful, say that instead of inventing a suggestion."""
+
+def parse_note(text):
+    """The structured note dict if the stored summary is the JSON shape.
+
+    Older cached notes are plain prose; callers fall back to rendering those as
+    a paragraph, so this returns None rather than raising on them.
+    """
+    if not text or not text.lstrip().startswith("{"):
+        return None
+    try:
+        d = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not (isinstance(d, dict) and d.get("read")):
+        return None
+    # A note cached in an older shape (flat findings, no parent) falls back to
+    # the plain-paragraph rendering instead of breaking the template.
+    if any(not (isinstance(g, dict) and "parent" in g)
+           for g in d.get("findings") or []):
+        return None
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -249,8 +307,14 @@ def build_context(engine, player_id):
         ctx["game_pitching"] = {
             "tracked_pitches": g["pitches"], "seasons": g["years"],
             "strike_pct": g["strike_pct"], "whiff_pct": g["whiff_pct"],
-            "pitch_mix": [f"{t['pitch_type']} {t['usage_pct']}% at {t['avg_velo']}"
-                          for t in (g.get("pitch_types") or [])[:4]]}
+            # Per pitch, so game results can sit under the pitch they belong to.
+            # "code" is our canonical pitch code; charted "Breaking Ball" has
+            # none and keeps its raw name rather than borrowing a pitch.
+            "by_pitch": [
+                {"pitch": t.get("code") or t["pitch_type"], "n": t["n"],
+                 "usage_pct": t["usage_pct"], "avg_velo": t["avg_velo"],
+                 "strike_pct": t["strike_pct"], "whiff_pct": t["whiff_pct"]}
+                for t in (g.get("pitch_types") or [])[:5]]}
     if game.get("batting"):
         b = game["batting"]
         ctx["game_hitting"] = {"pitches_seen": b["pitches_seen"],
@@ -286,13 +350,9 @@ def cached(engine, player_id, current_basis=None):
 
 def store(engine, player_id, want, text, model=MODEL):
     with engine.begin() as conn:
-        # One row per player PER KIND -- the full note and the header line are
-        # cached independently (a headline basis starts with 'hl-'), and an
-        # out-of-date one is worthless, not history.
-        kind = db.ai_summaries.c.basis.like("hl-%")
+        # One row per player -- an out-of-date summary is worthless, not history.
         conn.execute(delete(db.ai_summaries)
-                     .where(db.ai_summaries.c.player_id == player_id)
-                     .where(kind if want.startswith("hl-") else ~kind))
+                     .where(db.ai_summaries.c.player_id == player_id))
         conn.execute(insert(db.ai_summaries).values(
             player_id=player_id, basis=want, summary=text, model=model))
 
@@ -303,73 +363,23 @@ def _call_model(context):
     client = anthropic.Anthropic()
     resp = client.messages.create(
         model=MODEL,
-        # 600 truncated the analyst-length note mid-sentence. Still small: this
+        # The model thinks by default and max_tokens caps thinking AND text
+        # together -- 1100 risked truncating the JSON. Still small money: this
         # runs once per player per week, only when their data has moved.
-        max_tokens=1100,
-        output_config={"effort": "medium"},
+        max_tokens=2000,
+        output_config={"effort": "medium",
+                       # The schema guarantees the reply parses; the template
+                       # renders the fields directly.
+                       "format": {"type": "json_schema", "schema": NOTE_SCHEMA}},
         system=[{"type": "text", "text": SYSTEM,
                  "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user",
                    "content": "Write the development note for this player.\n\n"
                               + json.dumps(context, indent=1, default=str)}],
     )
+    if resp.stop_reason == "max_tokens":
+        return ""   # never cache a truncated note
     return "".join(b.text for b in resp.content if b.type == "text").strip()
-
-
-# The one-line read at the top of a pitcher's profile. Same analyst, much
-# shorter leash: it states who he is on the mound right now, and nothing else.
-HEADLINE_SYSTEM = """You are the pitching development analyst for Archbishop \
-Moeller High School, writing the single line under a pitcher's name at the top \
-of his page.
-
-ONE sentence, at most 28 words, plain text. Say who he is on the mound right \
-now: arsenal identity (slot, fastball velo, what he leans on), plus the one \
-current development headline if the context has one.
-
-Rules: every number comes from the context; name the pitch, never generalise one \
-pitch's number to the arsenal; no advice, no hedging boilerplate, no "the data \
-shows"; do not repeat his name -- it is printed directly above this line."""
-
-
-def generate_headline(engine, player_id, force=False, call_model=None):
-    """The header line, cached exactly like the full note."""
-    want = "hl-" + basis(engine, player_id)[:32]
-    if not force:
-        hit = cached(engine, player_id, want)
-        if hit:
-            return {**hit, "cached": True}
-
-    ctx = build_context(engine, player_id)
-    if not has_anything_to_say(ctx):
-        return {"summary": None, "cached": False, "skipped": "no data yet"}
-
-    if call_model is None:
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            return {"summary": None, "cached": False,
-                    "skipped": "no ANTHROPIC_API_KEY on the server"}
-
-        def call_model(context):
-            import anthropic
-            client = anthropic.Anthropic()
-            resp = client.messages.create(
-                # The model thinks by default and max_tokens caps thinking AND
-                # text together -- 120 truncated a headline mid-word.
-                model=MODEL, max_tokens=500,
-                output_config={"effort": "low"},
-                system=[{"type": "text", "text": HEADLINE_SYSTEM,
-                         "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user",
-                           "content": "Write the header line.\n\n"
-                                      + json.dumps(context, indent=1, default=str)}])
-            if resp.stop_reason == "max_tokens":
-                return ""   # never cache a cut-off line
-            return "".join(b.text for b in resp.content if b.type == "text").strip()
-
-    text = call_model(ctx)
-    if not text:
-        return {"summary": None, "cached": False, "skipped": "model returned nothing"}
-    store(engine, player_id, want, text)
-    return {"summary": text, "model": MODEL, "basis": want, "cached": False}
 
 
 def generate(engine, player_id, force=False, call_model=None):
@@ -441,8 +451,6 @@ def run_weekly(engine, days=7, everyone=False, call_model=None, dry_run=False,
         else:
             out["skipped"] += 1
         out["results"].append({"player_id": pid, **res})
-        # The header line rides along -- tiny output, same cache discipline.
-        generate_headline(engine, pid, call_model=call_model)
     return out
 
 
