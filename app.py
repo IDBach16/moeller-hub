@@ -457,9 +457,9 @@ def create_app():
     @app.route("/tools")
     def tools_page():
         return render_template(
-            "toolpage.html", nav="tools", heading="Tools",
-            blurb="Every analytics tool. These stay exactly as they are — they're "
-                  "the infrastructure the player pages are built on.",
+            "toolpage.html", nav="tools", heading="Applications",
+            blurb="Every analytics application. These stay exactly as they are — "
+                  "they're the infrastructure the player pages are built on.",
             tools=tools.TOOLS)
 
     # -----------------------------------------------------------------------

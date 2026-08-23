@@ -33,33 +33,64 @@ body{
   -webkit-font-smoothing:antialiased;
 }
 
-/* ===== NAV (spec 8.1) ===== */
-.nav{
-  position:sticky;top:0;z-index:50;
-  display:flex;align-items:center;gap:1.4rem;
-  padding:.75rem 1.5rem;
-  background:rgba(15,15,30,.82);
-  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-  border-bottom:1px solid rgba(197,165,90,.16);
+/* ===== SIDEBAR SHELL (replaces the top tab bar, Ian 2026-08-23) =====
+   Desktop: fixed 224px rail. Tablet: 64px icon rail. Phone: bottom tab bar
+   -- the hub is a PWA coaches open at the field, so thumbs get the nav. */
+.shell{display:flex;min-height:100vh}
+.side{
+  position:sticky;top:0;align-self:flex-start;height:100vh;width:224px;flex:none;
+  display:flex;flex-direction:column;gap:.35rem;padding:1.1rem .8rem 1rem;
+  background:rgba(13,13,26,.94);
+  border-right:1px solid rgba(197,165,90,.16);z-index:50;
 }
-.nav-brand{display:flex;align-items:center;gap:.6rem;text-decoration:none;flex-shrink:0}
-.nav-brand img{width:30px;height:30px;object-fit:contain}
-.nav-brand span{
-  font-size:.78rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--white);white-space:nowrap;
+.side-brand{
+  display:flex;align-items:center;gap:.65rem;text-decoration:none;
+  padding:.35rem .55rem 1rem;margin-bottom:.7rem;
+  border-bottom:1px solid rgba(197,165,90,.14);
 }
-.nav-links{display:flex;gap:.3rem;flex-wrap:wrap;margin-left:auto}
-.nav-links a{
-  padding:.42rem .8rem;border-radius:7px;text-decoration:none;
-  font-size:.78rem;font-weight:600;letter-spacing:.05em;
-  color:rgba(255,255,255,.62);transition:all .2s ease;white-space:nowrap;
+.side-brand img{width:36px;height:36px;object-fit:contain;flex:none}
+.side-brand span{
+  font-size:.72rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--white);line-height:1.35;
 }
-.nav-links a:hover{color:var(--gold);background:var(--gold-dim)}
-.nav-links a.active{color:var(--gold);background:var(--gold-dim)}
-@media(max-width:760px){
-  .nav{flex-wrap:wrap;gap:.6rem;padding:.7rem 1rem}
-  .nav-links{margin-left:0;width:100%;justify-content:flex-start}
-  .nav-links a{padding:.35rem .6rem;font-size:.73rem}
+.nlink{
+  display:flex;align-items:center;gap:.7rem;padding:.62rem .7rem;
+  border-radius:9px;border-left:3px solid transparent;
+  color:rgba(255,255,255,.6);text-decoration:none;
+  font-size:.84rem;font-weight:600;letter-spacing:.03em;
+  transition:color .18s,background .18s;
+}
+.nlink svg{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.nlink:hover{color:var(--gold-light);background:rgba(255,255,255,.045)}
+.nlink.active{color:var(--gold);background:var(--gold-dim);border-left-color:var(--gold)}
+.side-foot{margin-top:auto;padding:.8rem .6rem 0;font-size:.64rem;
+  letter-spacing:.08em;color:rgba(255,255,255,.28)}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.main>.footer{margin-top:auto}
+
+@media(max-width:1100px){
+  .side{width:64px;padding:1rem .45rem}
+  .side-brand{justify-content:center;padding:.25rem 0 .85rem}
+  .side-brand span{display:none}
+  .nlink{justify-content:center;padding:.62rem 0;border-left:none}
+  .nlink span{display:none}
+  .side-foot{display:none}
+}
+@media(max-width:700px){
+  .shell{flex-direction:column}
+  .side{
+    position:fixed;top:auto;bottom:0;height:auto;width:100%;
+    flex-direction:row;align-items:stretch;gap:0;padding:.3rem .35rem;
+    border-right:none;border-top:1px solid rgba(197,165,90,.22);
+    background:rgba(13,13,26,.92);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  }
+  .side-brand{display:none}
+  .nlink{flex:1;flex-direction:column;gap:.18rem;padding:.42rem 0;
+    font-size:.56rem;letter-spacing:.04em;justify-content:center}
+  .nlink span{display:block}
+  .main{padding-bottom:3.9rem}
 }
 
 /* ===== HERO ===== */
@@ -385,31 +416,42 @@ tr:last-child td{border-bottom:none}
 </head>
 <body>
 
-{% block nav %}
-<nav class="nav">
-  <a class="nav-brand" href="/">
+<div class="shell">
+<aside class="side" aria-label="Main navigation">
+  <a class="side-brand" href="/">
     <img src="/shield.png" alt=""/>
-    <span>Moeller Baseball</span>
+    <span>Moeller<br/>Baseball</span>
   </a>
-  <div class="nav-links">
-    <a href="/players"{% if nav=='players' %} class="active"{% endif %}>Players</a>
-    <a href="/team"{% if nav=='team' %} class="active"{% endif %}>Team Development</a>
-    <a href="/prep"{% if nav=='prep' %} class="active"{% endif %}>Game Prep</a>
-    <a href="/video"{% if nav=='video' %} class="active"{% endif %}>Video</a>
-    {# Data Collection is off the nav (Ian, 2026-08-19). The /collect route still
-       works if you go straight to it -- it holds the name-review queue -- but the
-       roster now comes from the school's roster pages, so coaches have no reason
-       to land there. #}
-    <a href="/tools"{% if nav=='tools' %} class="active"{% endif %}>Tools</a>
-  </div>
-</nav>
-{% endblock %}
+  <a class="nlink{% if nav=='players' %} active{% endif %}" href="/players" title="Players">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 19c.8-3.4 3.3-5 6.5-5s5.7 1.6 6.5 5"/></svg>
+    <span>Players</span></a>
+  <a class="nlink{% if nav=='team' %} active{% endif %}" href="/team" title="Team Development">
+    <svg viewBox="0 0 24 24"><polyline points="4 16 10 10 13.5 13.5 20 6.5"/><polyline points="14.5 6.5 20 6.5 20 12"/></svg>
+    <span>Team Dev</span></a>
+  <a class="nlink{% if nav=='prep' %} active{% endif %}" href="/prep" title="Game Prep">
+    <svg viewBox="0 0 24 24"><rect x="5.5" y="4.5" width="13" height="16" rx="2"/><path d="M9.5 4.5a2.5 2.5 0 0 1 5 0"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13.5" y2="15"/></svg>
+    <span>Game Prep</span></a>
+  <a class="nlink{% if nav=='video' %} active{% endif %}" href="/video" title="Video">
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="6" width="12.5" height="12" rx="2"/><polygon points="16.5 10.2 21 7.5 21 16.5 16.5 13.8"/></svg>
+    <span>Video</span></a>
+  {# Data Collection is off the nav (Ian, 2026-08-19). The /collect route still
+     works if you go straight to it -- it holds the name-review queue -- but the
+     roster now comes from the school's roster pages, so coaches have no reason
+     to land there. #}
+  <a class="nlink{% if nav=='tools' %} active{% endif %}" href="/tools" title="Applications">
+    <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+    <span>Applications</span></a>
+  <div class="side-foot">@MoeAnalytics</div>
+</aside>
 
+<main class="main">
 {% block body %}{% endblock %}
 
 <footer class="footer">
   Moeller Baseball Analytics <span>|</span> @MoeAnalytics
 </footer>
+</main>
+</div>
 
 {% block scripts %}{% endblock %}
 </body>
