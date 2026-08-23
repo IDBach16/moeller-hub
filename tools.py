@@ -112,6 +112,7 @@ CHIPS = [
     "Who led the team in AVG in 2026?",
     "What was Jack Ujvagi’s best pitch?",
     "How do our off-season bullpens look?",
+    "Where do I see Maybury’s Rapsodo work?",
 ]
 
 

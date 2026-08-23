@@ -565,6 +565,44 @@ def tool_team_stats(kind):
     return data
 
 
+def tool_app_links(player=None):
+    """Deeplinks: hub pages, every deployed application, and player-specific
+    views. The model cites these as [[Label|URL]] and the chat renders them
+    clickable -- it must never construct a URL itself, only relay these."""
+    import tools as registry
+    out = {
+        "how_to_cite": "Write a link as [[Label|URL]] -- the chat renders it "
+                       "as a clickable link. Only use URLs from this tool.",
+        "hub_pages": {
+            "players roster": "/players",
+            "team development (roster-wide changes, protocol gaps)": "/team",
+            "game prep": "/prep",
+            "video": "/video",
+            "applications directory": "/tools",
+        },
+        "applications": [
+            {"name": t["title"], "what": t["desc"], "url": t["url"]}
+            for t in registry.TOOLS
+        ],
+    }
+    if player:
+        row, err = _resolve(player)
+        if err:
+            return err
+        links = {
+            "hub profile (training history, changes, goals, AI note)":
+                f"/players/{row.slug}",
+        }
+        if row.is_pitcher:
+            # Same slug in both apps -- they read the same database.
+            links["Moeller Rapsodo dashboard (location, movement, velocity, "
+                  "percentiles, Stuff+, session by date)"] = \
+                f"https://rapsodo-app-production.up.railway.app/?p={row.slug}"
+        out["player"] = {"name": f"{row.first_name} {row.last_name}",
+                         "links": links}
+    return out
+
+
 TOOL_IMPLS = {
     # game-performance layer (unchanged -- these already worked)
     "list_players": tool_list_players,
@@ -583,6 +621,8 @@ TOOL_IMPLS = {
     "roster_alerts": tool_roster_alerts,
     "protocol_status": tool_protocol_status,
     "player_summary": tool_player_summary,
+    # navigation layer -- the assistant is also the hub's front door
+    "app_links": tool_app_links,
 }
 
 TOOLS = [
@@ -796,13 +836,32 @@ TOOLS = [
             "required": ["player"],
         },
     },
+    {
+        "name": "app_links",
+        "description": "Deeplinks for navigation: the hub's pages, every deployed "
+                       "Moeller application (Rapsodo dashboard, Pitcher/Hitter Cards, "
+                       "Scouting Agent, Video Search, Team Stats, Charting), and "
+                       "player-specific views when a player name is given (his hub "
+                       "profile; his Rapsodo dashboard if he pitches). Call it whenever "
+                       "the coach asks where to find or open something, or when your "
+                       "answer should end with a link to a richer view.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"player": {"type": "string",
+                                      "description": "optional player name for "
+                                                     "player-specific links"}},
+        },
+    },
 ]
 
-SYSTEM = """You are the Player Development Assistant on the Moeller Baseball Analytics hub, \
-answering questions for Archbishop Moeller High School coaches.
+SYSTEM = """You are the assistant on the Moeller Baseball Analytics hub -- the front door \
+to the whole system for Archbishop Moeller High School coaches.
 
-Your job is development, not just lookup: what changed for a player, what the evidence is, \
-and what a coach might want to look at next.
+Your job has two halves. DEVELOPMENT: what changed for a player, what the evidence is, and \
+what a coach might want to look at next. NAVIGATION: the hub sits on top of a family of \
+apps (the Rapsodo dashboard, Pitcher and Hitter Cards, Scouting Agent, Video Search, Team \
+Stats, Charting), and you know where everything lives -- when an answer has a richer view \
+somewhere, hand the coach the link to it.
 
 TWO LAYERS OF DATA
 
@@ -826,6 +885,19 @@ HOW TO WORK
   Do not do statistics in your head or recompute what a tool already gave you.
 - For team-wide questions use roster_alerts; for collection gaps use protocol_status.
 
+NAVIGATION AND DEEPLINKS
+
+- app_links returns every destination: the hub's own pages, every deployed application \
+with what it is for, and player-specific views (his hub profile; his Rapsodo dashboard \
+if he pitches) when you pass a player name.
+- Cite a link as [[Label|URL]] -- the chat renders that as a clickable link. This is the \
+ONE exception to the plain-text rule. Use URLs exactly as a tool returned them; never \
+construct, guess, or modify one.
+- When a coach asks where something is, the link IS the answer. When a data answer has an \
+obvious deeper view -- a pitcher question has his Rapsodo dashboard, a development \
+question has his hub profile -- end with that one link. One or two links, never a menu \
+of everything.
+
 WHAT NOT TO DO
 
 - Never invent a number. Answer only from tool results. If a tool returns empty or an
@@ -845,7 +917,8 @@ STYLE
 - Lead with the answer and the key numbers. A couple of short paragraphs or a few plain
   lines is right. You're talking to coaches — baseball shorthand is fine.
 - Plain text ONLY. The chat window renders your reply literally, so never use markdown:
-  no **bold**, no ## headers, no tables, no bullet asterisks. Dashes and line breaks are fine.
+  no **bold**, no ## headers, no tables, no bullet asterisks. Dashes and line breaks are
+  fine. The single exception is the [[Label|URL]] link form described above.
 - Whiff% means swinging strikes over swings. Attack zones: Heart (middle), Shadow (edges),
   Chase, Waste. The 2026 season is complete; charting data is current off-season work.
 - Only baseball and Moeller-data questions; politely decline anything else."""

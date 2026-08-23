@@ -73,6 +73,9 @@
   border-bottom-right-radius:4px}
 .ca-bot{align-self:flex-start;background:rgba(26,26,46,.8);border:1px solid rgba(255,255,255,.08);
   border-bottom-left-radius:4px}
+.ca-bot a{color:var(--gold-light);text-decoration:underline;
+  text-underline-offset:2px;text-decoration-color:rgba(197,165,90,.5)}
+.ca-bot a:hover{color:var(--gold)}
 .ca-hint{color:rgba(255,255,255,.5);font-size:.88rem;text-align:center;margin:auto 0;
   padding:0 1rem;line-height:1.7}
 .ca-chips{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;margin-top:.9rem}
@@ -118,7 +121,9 @@
   <div class="ca-box">
     <div class="ca-msgs" id="caMsgs">
       <div class="ca-hint">
-        <p>Ask anything about Moeller baseball &mdash; season stats, pitchers, hitters, bullpens.</p>
+        <p>Ask anything about Moeller baseball &mdash; season stats, pitchers, hitters,
+        bullpens &mdash; or where to find anything, and it will link you straight into
+        the right app.</p>
         <div class="ca-chips">
           {% for chip in chips %}<span class="ca-chip">{{ chip }}</span>{% endfor %}
         </div>
@@ -298,9 +303,22 @@
     if(chip){input.value=chip.textContent;ask();}
   });
 
+  // The assistant cites deeplinks as [[Label|URL]]. Everything is escaped
+  // first, then only that pattern becomes an anchor -- and only for URLs that
+  // are hub-relative or https, so the model can't inject markup or javascript:.
+  function linkify(text){
+    const esc=t=>t.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    return esc(text).replace(/\[\[([^\]|]{1,120})\|([^\]\s]{1,300})\]\]/g,(m,label,url)=>{
+      if(!/^(\/[^\/]|https:\/\/)/.test(url)) return label;
+      const ext=url.startsWith('https:');
+      return '<a href="'+url+'"'+(ext?' target="_blank" rel="noopener"':'')+'>'+label+'</a>';
+    });
+  }
+
   function bubble(cls,text){
     const hint=msgs.querySelector('.ca-hint'); if(hint)hint.remove();
-    const el=document.createElement('div'); el.className='ca-msg '+cls; el.textContent=text;
+    const el=document.createElement('div'); el.className='ca-msg '+cls;
+    if(cls==='ca-bot'){ el.innerHTML=linkify(text); } else { el.textContent=text; }
     msgs.appendChild(el); msgs.scrollTop=msgs.scrollHeight; return el;
   }
 
