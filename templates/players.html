@@ -3,7 +3,22 @@
 
 {% block head %}
 <style>
-.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem}
+/* The sidebar freed the width the old top bar reserved -- use it. */
+.page{max-width:1400px}
+.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:.9rem}
+/* Players with nothing tracked yet don't earn a card -- a full-size empty box
+   47 times over buried the players a coach actually looks for. */
+.nodata-sec{margin-top:2rem}
+.nodata-sec h2{font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;
+  color:rgba(255,255,255,.45);margin-bottom:.7rem}
+.nodata-sec h2 b{color:var(--gold)}
+.chips{display:flex;gap:.45rem;flex-wrap:wrap}
+.pchip{display:inline-flex;align-items:center;gap:.45rem;padding:.32rem .75rem;
+  border:1px solid rgba(255,255,255,.1);border-radius:999px;
+  background:rgba(255,255,255,.03);color:rgba(255,255,255,.65);
+  font-size:.78rem;text-decoration:none;transition:all .2s}
+.pchip:hover{border-color:rgba(197,165,90,.45);color:var(--white)}
+.pchip small{font-size:.64rem;color:rgba(255,255,255,.35)}
 .pcard{
   display:block;text-decoration:none;color:var(--white);
   background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;
@@ -90,8 +105,10 @@
   </div>
 
   {% if roster %}
+  {% set with_data = roster|selectattr('sessions')|list %}
+  {% set no_data = roster|rejectattr('sessions')|list %}
   <div class="roster" id="roster">
-    {% for p in roster %}
+    {% for p in with_data %}
     <a class="pcard" href="/players/{{ p.slug }}"
        data-name="{{ p.name|lower }}" data-side="{{ 'pitching' if p.is_pitcher else 'hitting' }}">
       <div class="nm">{{ p.name }}</div>
@@ -182,6 +199,22 @@
     </a>
     {% endfor %}
   </div>
+
+  {% if no_data %}
+  <div class="nodata-sec">
+    <h2><b>{{ no_data|length }}</b> without training data yet</h2>
+    <div class="chips">
+      {% set CY = {'Freshman':'Fr','Sophomore':'So','Junior':'Jr','Senior':'Sr'} %}
+      {% for p in no_data %}
+      <a class="pchip" href="/players/{{ p.slug }}"
+         data-name="{{ p.name|lower }}" data-side="{{ 'pitching' if p.is_pitcher else 'hitting' }}">
+        {{ p.name }}
+        <small>{{ 'P' if p.is_pitcher else 'Pos' }}{% if p.class_year %} &middot; {{ CY.get(p.class_year, p.class_year) }}{% endif %}</small>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   {% else %}
   <div class="panel">
     <p class="empty">
@@ -196,7 +229,7 @@
 {% block scripts %}
 <script>
 (function(){
-  const cards = [...document.querySelectorAll('.pcard')];
+  const cards = [...document.querySelectorAll('.pcard, .pchip')];
   const filter = document.getElementById('filter');
   const count = document.getElementById('count');
   let side = '';
