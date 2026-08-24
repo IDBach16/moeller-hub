@@ -95,6 +95,32 @@
   background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy);
   font-weight:700;font-size:.82rem;letter-spacing:.06em;text-transform:uppercase}
 .ca-input button:disabled{opacity:.5;cursor:wait}
+
+/* ===== this-week strip ===== */
+.week-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.2rem}
+.wk-card h2{margin-bottom:.8rem}
+.attn{margin-left:auto;font-size:.74rem;font-weight:700;text-decoration:none;
+  color:#e79a9a;background:rgba(231,154,154,.12);border:1px solid rgba(231,154,154,.3);
+  border-radius:999px;padding:.28rem .75rem}
+.attn:hover{background:rgba(231,154,154,.2)}
+.res{display:inline-block;width:22px;height:22px;border-radius:6px;text-align:center;
+  line-height:22px;font-size:.72rem;font-weight:800}
+.res.W{background:rgba(120,200,140,.2);color:#8fd9a4}
+.res.L{background:rgba(231,154,154,.2);color:#e79a9a}
+.wk-game{display:block;text-decoration:none;color:inherit}
+a.wk-game:hover .wg-opp{color:var(--gold)}
+.wg-top{display:flex;align-items:baseline;gap:.55rem;flex-wrap:wrap}
+.wg-opp{font-size:1.05rem;font-weight:700;transition:color .2s}
+.wg-score{margin-left:auto;font-family:ui-monospace,Consolas,monospace;
+  font-weight:800;font-size:1.05rem}
+.wg-dt{font-size:.74rem;color:rgba(255,255,255,.45);margin-top:.15rem}
+.wg-line{font-family:ui-monospace,Consolas,monospace;font-size:.76rem;
+  color:rgba(255,255,255,.65);margin-top:.6rem}
+.wg-more{margin-top:.6rem;font-size:.68rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--gold)}
+.wk-all{display:inline-block;margin-top:.7rem;font-size:.75rem;color:var(--gold);
+  text-decoration:none;letter-spacing:.05em}
+.wk-all:hover{text-decoration:underline}
 </style>
 {% endblock %}
 
@@ -103,7 +129,7 @@
 <section class="hero">
   <div class="hero-content">
     <img src="/shield.png" alt="Moeller Shield" class="shield-logo"/>
-    <h1 class="hero-title">Moeller Baseball Analytics</h1>
+    <h1 class="hero-title">Moeller Baseball <span>Analytics</span></h1>
     <div class="hero-divider"></div>
     <div class="search-wrap">
       <div class="search-box">
@@ -137,14 +163,69 @@
 </section>
 
 <div class="page">
-  <div class="two-col">
+  <div class="page-head" style="align-items:baseline;gap:.8rem">
+    <h1 style="font-size:1.15rem">This week</h1>
+    <span class="muted" style="font-size:.8rem">{{ week_label }}</span>
+    <a href="/season?week={{ week_start }}" style="font-size:.75rem">Full week &rarr;</a>
+    {% set attention = overview.counts.open_reviews + due.goals|length + due.interventions|length %}
+    {% if attention %}
+    <a class="attn" href="/team">{{ attention }} need{{ '' if attention == 1 else 's' }} attention &rarr;</a>
+    {% endif %}
+  </div>
 
-    <!-- ====== WHAT CHANGED ====== -->
-    <section class="panel">
-      <h2>What changed this week</h2>
-      <p class="hint">Meaningful moves against each player&rsquo;s own baseline.</p>
+  <div class="week-strip">
+    <!-- latest game -->
+    <section class="panel wk-card">
+      <h2>Latest game</h2>
+      {% if latest_game %}
+      {% if latest_game.box_url %}<a class="wk-game" href="{{ latest_game.box_url }}"
+         {% if latest_game.external_box %}target="_blank" rel="noopener"{% endif %}>
+      {% else %}<div class="wk-game">{% endif %}
+        <div class="wg-top">
+          {% if latest_game.result %}<span class="res {{ latest_game.result }}">{{ latest_game.result }}</span>{% endif %}
+          <span class="wg-opp">{{ 'vs' if latest_game.home_away == 'home' else ('at' if latest_game.home_away == 'away' else '') }} {{ latest_game.opponent }}</span>
+          <span class="wg-score">{{ latest_game.score or '' }}</span>
+        </div>
+        <div class="wg-dt">{{ latest_game.weekday }} {{ latest_game.date }}
+          {%- if not latest_game.official %} &middot; scrimmage{% endif %}</div>
+        {% if latest_game.pitching %}
+        <div class="wg-line">{{ latest_game.pitching.pitches }} pitches &middot;
+          {{ latest_game.pitching.strike_pct }}% strikes &middot;
+          {{ latest_game.pitching.whiff_pct }}% whiffs &middot;
+          K/BB {{ latest_game.pitching.k }}/{{ latest_game.pitching.bb }}</div>
+        {% endif %}
+        {% if latest_game.box_url %}<div class="wg-more">Box score &rarr;</div>{% endif %}
+      {% if latest_game.box_url %}</a>{% else %}</div>{% endif %}
+      {% else %}
+      <p class="empty">No games on record yet.</p>
+      {% endif %}
+    </section>
+
+    <!-- trends worth noting -->
+    <section class="panel wk-card">
+      <h2>Trends worth noting</h2>
+      {% if notable %}
+        {% for f in notable %}
+        <div class="feed-item">
+          <div class="dot {{ 'good' if f.good else 'bad' }}"></div>
+          <div>
+            <a href="/season?week={{ week_start }}">{{ f.player }}</a>
+            <div class="why">{{ f.metric }} {{ '+' if f.delta > 0 else '' }}{{ f.delta }}{{ f.unit if f.unit != '%' else ' pts' }}
+              &middot; {{ f.now }}{{ f.unit }} vs {{ f.base }}{{ f.unit }} prior</div>
+          </div>
+        </div>
+        {% endfor %}
+        <a class="wk-all" href="/season?week={{ week_start }}">All trends &rarr;</a>
+      {% else %}
+      <p class="empty">Nothing cleared the thresholds &mdash; a quiet week is a valid week.</p>
+      {% endif %}
+    </section>
+
+    <!-- what changed -->
+    <section class="panel wk-card">
+      <h2>What changed</h2>
       {% if overview.changes %}
-        {% for c in overview.changes[:8] %}
+        {% for c in overview.changes[:3] %}
         <div class="feed-item">
           <div class="dot {{ 'good' if c.favorable else ('bad' if c.favorable is false else 'flat') }}"></div>
           <div>
@@ -153,72 +234,14 @@
           </div>
         </div>
         {% endfor %}
+        <a class="wk-all" href="/team">All changes &rarr;</a>
       {% else %}
-        <p class="empty">
-          Nothing yet &mdash; change detection needs a baseline to compare against, and
-          that arrives with the first few weeks of Blast, HitTrax or Rapsodo sessions.
-        </p>
+      <p class="empty">Nothing yet &mdash; change detection needs a baseline first.</p>
       {% endif %}
     </section>
-
-    <!-- ====== NEEDS REVIEW ====== -->
-    <section class="panel">
-      <h2>Needs review</h2>
-      <p class="hint">Where the data collection has gaps.</p>
-      {% if overview.counts.open_reviews %}
-      <div class="feed-item">
-        <div class="dot bad"></div>
-        <div>
-          <a href="/collect">{{ overview.counts.open_reviews }} name(s) awaiting review</a>
-          <div class="why">Export names that didn&rsquo;t resolve to a player. Nothing has been
-            attributed to them yet.</div>
-        </div>
-      </div>
-      {% endif %}
-      {% if overview.no_data %}
-      <div class="feed-item">
-        <div class="dot flat"></div>
-        <div>
-          <a href="/team">{{ overview.no_data|length }} player(s) with no training data</a>
-          <div class="why">No Blast, HitTrax, Rapsodo or charted session on record.</div>
-        </div>
-      </div>
-      {% endif %}
-      {% if overview.no_baseline and overview.counts.sessions %}
-      <div class="feed-item">
-        <div class="dot flat"></div>
-        <div>
-          <a href="/team">{{ overview.no_baseline|length }} player(s) without a baseline session</a>
-          <div class="why">A baseline is what every later session gets compared against.</div>
-        </div>
-      </div>
-      {% endif %}
-      {% for g in due.goals %}
-      <div class="feed-item">
-        <div class="dot bad"></div>
-        <div>
-          <a href="/players/{{ g.slug }}">{{ g.player }} &mdash; goal due for review</a>
-          <div class="why">&ldquo;{{ g.title }}&rdquo; was due {{ g.review_on }}.</div>
-        </div>
-      </div>
-      {% endfor %}
-      {% for i in due.interventions %}
-      <div class="feed-item">
-        <div class="dot bad"></div>
-        <div>
-          <a href="/players/{{ i.slug }}">{{ i.player }} &mdash; intervention due for review</a>
-          <div class="why">&ldquo;{{ i.title }}&rdquo; was due {{ i.review_on }} and is still pending.</div>
-        </div>
-      </div>
-      {% endfor %}
-      {% if not overview.counts.open_reviews and not overview.no_data and not overview.no_baseline
-            and not due.goals and not due.interventions %}
-        <p class="empty">Nothing needs attention.</p>
-      {% endif %}
-    </section>
-
   </div>
 
+  
   <p class="page-sub" style="margin:.6rem 0 0">
     <a href="/tools" style="color:var(--gold);text-decoration:none">
       All analytics tools &rarr;</a>

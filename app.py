@@ -393,9 +393,20 @@ def create_app():
     def index():
         import development
         import profiles
+        import season as season_mod
+        # The same week the Season tab would land on (current week in season,
+        # latest game week otherwise) drives the home page's "this week" strip.
+        view = season_mod.week_view()
+        latest_game = next((g for g in reversed(view["games"])
+                            if g["official"] or g["tracked"]), None)
         return render_template("home.html", nav="home", chips=tools.CHIPS,
                                overview=profiles.team_overview(_engine()),
-                               due=development.due_for_review(_engine()))
+                               due=development.due_for_review(_engine()),
+                               week_start=view["start"],
+                               week_label=view["label"],
+                               latest_game=latest_game,
+                               notable=season_mod.notable_trends(view["start"],
+                                                                 limit=3))
 
     @app.route("/players")
     def players_page():

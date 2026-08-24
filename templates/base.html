@@ -94,15 +94,19 @@ body{
 }
 
 /* ===== HERO ===== */
+/* Compact by design (Ian, 2026-08-24): coaches open this page daily, and the
+   sidebar already carries the brand -- the first screen belongs to search,
+   the assistant, and this week, not to a splash. */
 .hero{
   position:relative;
-  min-height:70vh;
+  min-height:40vh;
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
   text-align:center;
   overflow:hidden;
+  padding:2.2rem 0;
 }
 .hero::before{
   content:'';
@@ -124,35 +128,23 @@ body{
 }
 .hero-content{position:relative;z-index:2;padding:2rem 1rem}
 
-/* Shield logo */
+/* Shield logo -- static; the pulse/shimmer effects read as template, not program */
 .shield-logo{
-  width:140px;height:140px;
+  width:84px;height:84px;
   object-fit:contain;
-  margin-bottom:1.5rem;
-  filter:drop-shadow(0 0 30px rgba(197,165,90,.4));
-  animation:shieldPulse 4s ease-in-out infinite;
-}
-@keyframes shieldPulse{
-  0%,100%{filter:drop-shadow(0 0 20px rgba(197,165,90,.3))}
-  50%{filter:drop-shadow(0 0 40px rgba(197,165,90,.6))}
+  margin-bottom:1rem;
+  filter:drop-shadow(0 0 22px rgba(197,165,90,.35));
 }
 
 .hero-title{
-  font-size:clamp(2rem,5vw,3.5rem);
+  font-size:clamp(1.5rem,3.2vw,2.2rem);
   font-weight:900;
   letter-spacing:.12em;
   text-transform:uppercase;
-  background:linear-gradient(135deg,var(--white) 0%,var(--gold) 50%,var(--white) 100%);
-  background-size:200% auto;
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-  animation:shimmer 6s linear infinite;
+  color:var(--white);
   margin-bottom:.5rem;
 }
-@keyframes shimmer{
-  0%{background-position:0% center}
-  100%{background-position:200% center}
-}
+.hero-title span{color:var(--gold)}
 
 /* Divider */
 .hero-divider{
@@ -304,7 +296,9 @@ body{
 }
 
 /* ===== SHARED PAGE FURNITURE (players / player / team / prep / video / collect) ===== */
-.page{max-width:1150px;margin:0 auto;padding:2.5rem 1.5rem 4rem}
+/* width:100% because .page is a flex child of .main and its auto margins
+   otherwise shrink-wrap it to content width instead of stretching. */
+.page{width:100%;max-width:1150px;margin:0 auto;padding:2.5rem 1.5rem 4rem}
 .page-head{display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:.4rem}
 .page-head h1{font-size:1.9rem;font-weight:800;letter-spacing:.02em}
 .page-head a{color:var(--gold);font-size:.8rem;text-decoration:none;
