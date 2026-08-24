@@ -29,6 +29,7 @@ PLOT_KEYS = {
     "release_side": "rel_s",
     "plate_side": "px",      # inches, catcher's view, 0 = middle of the plate
     "plate_height": "pz",    # inches above the ground
+    "is_strike": "strike",   # the unit's own zone call, 1/0
 }
 
 # Usage order on the card: the fastball first, then whatever he throws most.
@@ -248,8 +249,53 @@ def card(engine, player_id: int) -> dict:
             {"pt": p["pt"], "velo": _r(p.get("velo")), "spin": _r(p.get("spin"), 0),
              "ivb": _r(p.get("ivb")), "hb": _r(p.get("hb")),
              "rel_h": _r(p.get("rel_h"), 2), "rel_s": _r(p.get("rel_s"), 2),
-             "px": _r(p.get("px")), "pz": _r(p.get("pz")), "date": p["date"]}
+             "px": _r(p.get("px")), "pz": _r(p.get("pz")),
+             "strike": _r(p.get("strike"), 0), "eff": _r(p.get("eff"), 0),
+             "date": p["date"]}
             for p in plist
         ],
         "trend": trend,
     }
+
+
+def session_log(pitches):
+    """The session log's rows: one entry per bullpen, one line per pitch type.
+
+    Per pitch because pooled session averages are the mix-shift trap all over
+    again -- a night of extra sliders drags the pooled IVB down with no pitch
+    having changed. A type needs 3+ reps to get a line (one mis-tagged pitch
+    is noise, not an offering); UNK never earns one.
+    """
+    by_date = defaultdict(list)
+    for p in pitches:
+        by_date[p["date"]].append(p)
+    out = []
+    for dt in sorted(by_date, reverse=True):
+        g = by_date[dt]
+        strikes = [x.get("strike") for x in g if x.get("strike") is not None]
+        by_pt = defaultdict(list)
+        for x in g:
+            by_pt[x["pt"]].append(x)
+        rows = []
+        for pt, gg in by_pt.items():
+            if pt == "UNK" or len(gg) < 3:
+                continue
+            velos = [x["velo"] for x in gg if x.get("velo") is not None]
+            rows.append({
+                "pt": pt, "label": metrics.PITCH_TYPE_LABELS.get(pt, pt),
+                "n": len(gg),
+                "velo": _mean(velos),
+                "max": round(max(velos), 1) if velos else None,
+                "ivb": _mean([x.get("ivb") for x in gg]),
+                "hb": _mean([x.get("hb") for x in gg]),
+                "spin": _r(_mean([x.get("spin") for x in gg]), 0),
+                "eff": _r(_mean([x.get("eff") for x in gg]), 0),
+            })
+        rows.sort(key=lambda r: (PITCH_ORDER.index(r["pt"])
+                                 if r["pt"] in PITCH_ORDER else 99, -r["n"]))
+        out.append({
+            "date": dt, "n": len(g),
+            "zone_pct": _r(100.0 * sum(strikes) / len(strikes), 0) if strikes else None,
+            "rows": rows,
+        })
+    return out

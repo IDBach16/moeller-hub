@@ -127,6 +127,24 @@
 .note-caveat{margin:.8rem 0 0;font-size:.78rem;font-style:italic;
   color:rgba(255,255,255,.5)}
 
+/* session log */
+.src{display:block;font-size:.64rem;color:rgba(255,255,255,.32);
+  letter-spacing:.04em}
+tr.sess td{background:rgba(255,255,255,.035);font-weight:600;font-size:.82rem;
+  padding-top:.65rem;padding-bottom:.65rem}
+.src-inline{font-size:.66rem;color:rgba(255,255,255,.35);letter-spacing:.05em;
+  margin-left:.35rem}
+.sess-tot{float:right;font-family:ui-monospace,Consolas,monospace;
+  font-size:.72rem;font-weight:400;color:rgba(255,255,255,.55)}
+.mx{font-size:.7rem;color:rgba(255,255,255,.4);font-weight:400}
+td.strong{color:var(--white);font-weight:700}
+.mchips{display:flex;gap:.35rem;flex-wrap:wrap}
+.mchip{font-size:.72rem;padding:.15rem .5rem;border-radius:6px;
+  background:rgba(255,255,255,.05);color:rgba(255,255,255,.6);
+  white-space:nowrap}
+.mchip b{color:rgba(255,255,255,.9);font-weight:600}
+.mchip i{font-style:normal;color:rgba(255,255,255,.35);font-size:.64rem}
+
 /* baseline-building progress: a pitcher's first 3 bullpens set his baseline */
 .bdots{display:inline-flex;gap:.32rem;margin-right:.6rem;vertical-align:baseline}
 .bdots i{width:9px;height:9px;border-radius:50%;display:inline-block;
@@ -474,27 +492,73 @@
     <section class="panel">
       <h2>{% if card and card.has_data %}Session log{% else %}Training history{% endif %}</h2>
       <p class="hint">
-        {%- if p.player.is_pitcher %}Rapsodo and charted bullpens.{% else %}Blast and HitTrax sessions.{% endif %}
-        Session averages, never raw rows.
+        {%- if p.player.is_pitcher %}Each bullpen, each pitch he threw in it &mdash;
+        session averages per pitch type, never pooled across them.{% else %}Blast
+        and HitTrax sessions, session averages.{% endif %}
       </p>
       {% if p.training %}
       <div class="scroll">
+        {% if p.player.is_pitcher %}
+        {# One group per bullpen, one line per pitch type -- pooled session
+           averages are the mix-shift trap all over again. #}
         <table>
-          <thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Purpose</th><th>Metrics</th></tr></thead>
+          <thead><tr><th>Pitch</th><th>N</th><th>Velo</th><th>Max</th>
+            <th>IVB</th><th>HB</th><th>Spin</th><th>Eff</th></tr></thead>
+          <tbody>
+            {% for s in p.training[:15] %}
+            {% set e = slog.get(s.date) %}
+            <tr class="sess">
+              <td colspan="8">
+                <span class="mono">{{ s.date }}</span>
+                &middot; {{ s.type.replace('_',' ')|title }}
+                {%- if s.purpose %} <span class="pill flat">{{ s.purpose }}</span>{% endif %}
+                <span class="src-inline">{{ s.source }}</span>
+                {% if e %}<span class="sess-tot">{{ e.n }} pitches
+                  {%- if e.zone_pct is not none %} &middot; {{ e.zone_pct }}% in the zone{% endif %}</span>{% endif %}
+              </td>
+            </tr>
+            {% if e %}
+              {% for r in e.rows %}
+              <tr>
+                <td><span class="rap-sw" data-pt="{{ r.pt }}"></span>{{ r.label }}</td>
+                <td class="mono">{{ r.n }}</td>
+                <td class="mono strong">{{ r.velo if r.velo is not none else '—' }}</td>
+                <td class="mono">{{ r.max if r.max is not none else '—' }}</td>
+                <td class="mono">{{ r.ivb if r.ivb is not none else '—' }}</td>
+                <td class="mono">{{ r.hb if r.hb is not none else '—' }}</td>
+                <td class="mono">{{ r.spin if r.spin is not none else '—' }}</td>
+                <td class="mono">{% if r.eff is not none %}{{ r.eff }}%{% else %}&mdash;{% endif %}</td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              {% set m = s.metrics %}
+              {% set v = m.get('velocity') %}
+              <tr><td colspan="8" class="muted" style="font-size:.78rem">
+                {% if v %}{{ v.n }} pitches, {{ v.mean }} mph avg &mdash; no per-pitch detail from this source{% else %}no pitch detail{% endif %}
+              </td></tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        {# Hitters (Blast/HitTrax, when it lands): compact chips, not a blob. #}
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Metrics</th></tr></thead>
           <tbody>
             {% for s in p.training[:15] %}
             <tr>
               <td class="mono">{{ s.date }}</td>
-              <td>{{ s.type.replace('_',' ')|title }}</td>
-              <td class="muted">{{ s.source }}</td>
-              <td>{% if s.purpose %}<span class="pill flat">{{ s.purpose }}</span>{% else %}<span class="muted">&mdash;</span>{% endif %}</td>
-              <td class="samples">
-                {% for k, m in s.metrics.items() %}{{ m.label }} {{ m.mean }}{{ m.unit }} (n={{ m.n }}){% if not loop.last %} &middot; {% endif %}{% endfor %}
-              </td>
+              <td>{{ s.type.replace('_',' ')|title }}<small class="src">{{ s.source }}</small></td>
+              <td><div class="mchips">
+                {% for k, m in s.metrics.items() %}
+                <span class="mchip">{{ m.label }} <b>{{ m.mean }}{{ m.unit }}</b> <i>n={{ m.n }}</i></span>
+                {% endfor %}
+              </div></td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
+        {% endif %}
       </div>
       {% else %}
       <p class="empty">

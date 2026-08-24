@@ -436,8 +436,10 @@ def create_app():
         if p["player"]["is_pitcher"]:
             import rapsodo_card
             card = rapsodo_card.card(_engine(), p["player"]["id"])
+        slog = {e["date"]: e for e in rapsodo_card.session_log(card["pitches"])} \
+            if card and card.get("has_data") else {}
         return render_template(
-            "player.html", nav="players", p=p, card=card,
+            "player.html", nav="players", p=p, card=card, slog=slog,
             writes_enabled=writes_enabled(),
             metric_options=development.goal_metric_options(),
             directions=db.GOAL_DIRECTIONS,
