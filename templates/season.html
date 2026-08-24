@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Season — Moeller Baseball Analytics{% endblock %}
+
+{% block head %}
+<style>
+.page{max-width:1400px}
+
+/* week header */
+.wknav{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:1.4rem}
+.wknav .wk{font-size:1.15rem;font-weight:800;letter-spacing:.01em}
+.wkbtn{display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;border:1px solid var(--glass-border);border-radius:8px;
+  color:var(--gold);text-decoration:none;font-size:1rem;transition:all .2s}
+.wkbtn:hover{background:var(--gold-dim)}
+.wkbtn.off{opacity:.25;pointer-events:none}
+.wknav select{width:auto;min-width:180px}
+.rec{margin-left:auto;display:flex;gap:.5rem;flex-wrap:wrap}
+
+/* game cards */
+.gweek{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:1rem}
+.gcard{background:var(--glass);border:1px solid var(--glass-border);
+  border-radius:13px;padding:1.1rem 1.2rem}
+.gcard .top{display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap}
+.gcard .opp{font-size:1.05rem;font-weight:700}
+.gcard .dt{font-size:.74rem;color:rgba(255,255,255,.45)}
+.gcard .score{margin-left:auto;font-family:ui-monospace,Consolas,monospace;
+  font-weight:800;font-size:1.05rem}
+.res{display:inline-block;width:22px;height:22px;border-radius:6px;text-align:center;
+  line-height:22px;font-size:.72rem;font-weight:800}
+.res.W{background:rgba(120,200,140,.2);color:#8fd9a4}
+.res.L{background:rgba(231,154,154,.2);color:#e79a9a}
+.gline{display:flex;gap:1rem;flex-wrap:wrap;margin-top:.7rem;
+  padding-top:.7rem;border-top:1px solid rgba(255,255,255,.07)}
+.gline .kv{font-family:ui-monospace,Consolas,monospace;font-size:.74rem;
+  color:rgba(255,255,255,.75)}
+.gline .kv b{color:var(--white)}
+.gline .lbl{display:block;font-size:.58rem;letter-spacing:.09em;
+  text-transform:uppercase;color:rgba(255,255,255,.38);font-family:inherit}
+.arms{margin-top:.6rem;font-size:.76rem;color:rgba(255,255,255,.6);line-height:1.7}
+.arms b{color:rgba(255,255,255,.85);font-weight:600}
+
+/* notable-trend rows -- same look as the What-changed feed */
+.chg{display:flex;gap:.8rem;align-items:flex-start;padding:.7rem 0;
+  border-bottom:1px solid rgba(255,255,255,.06)}
+.chg:last-child{border-bottom:none}
+.chg .dot{width:8px;height:8px;border-radius:50%;margin-top:.45rem;flex-shrink:0}
+.chg .dot.good{background:#8fd9a4}
+.chg .dot.bad{background:#e79a9a}
+.chg .ttl{font-weight:600;font-size:.92rem;display:flex;gap:.5rem;
+  align-items:center;flex-wrap:wrap}
+.chg .why{font-size:.8rem;color:rgba(255,255,255,.5);margin-top:.15rem}
+
+/* a tracked game card is a link into its box score */
+a.gcard{display:block;color:inherit;text-decoration:none;
+  transition:border-color .2s,transform .2s}
+a.gcard:hover{border-color:rgba(197,165,90,.45);transform:translateY(-2px)}
+.gcard .more{margin-top:.6rem;font-size:.68rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--gold)}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+  <div class="page-head"><h1>Season</h1></div>
+  <p class="page-sub">
+    Week by week: the games, the outcomes, and what the tracked data said.
+    Official results join automatically; a tracked date without one is a scrimmage,
+    a result without tracking is a game AWRE missed.
+  </p>
+
+  {% if view.fell_back %}
+  <div class="note">
+    No games this week &mdash; showing the most recent game week. Use the arrows
+    or the picker to jump anywhere in the season.
+  </div>
+  {% endif %}
+
+  <div class="wknav">
+    <a class="wkbtn {{ 'off' if not view.prev }}" href="/season?week={{ view.prev }}">&larr;</a>
+    <span class="wk">{{ view.label }}</span>
+    <a class="wkbtn {{ 'off' if not view.next }}" href="/season?week={{ view.next }}">&rarr;</a>
+    <form method="get" style="display:inline">
+      <select name="week" onchange="this.form.submit()">
+        {% for w in view.weeks %}
+        <option value="{{ w }}" {% if w == view.start %}selected{% endif %}>week of {{ w }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <span class="rec">
+      {% if view.record.W or view.record.L %}
+      <span class="pill {{ 'ok' if view.record.W >= view.record.L else 'bad' }}">
+        {{ view.record.W }}&ndash;{{ view.record.L }} this week</span>
+      <span class="pill flat">RF {{ view.record.rf }} &middot; RA {{ view.record.ra }}</span>
+      {% endif %}
+    </span>
+  </div>
+
+  {% if view.games %}
+  <div class="gweek">
+    {% for g in view.games %}
+    {% if g.box_url %}<a class="gcard" href="{{ g.box_url }}"{% if g.external_box %} target="_blank" rel="noopener"{% endif %}>
+    {%- else %}<div class="gcard">{% endif %}
+      <div class="top">
+        {% if g.result %}<span class="res {{ g.result }}">{{ g.result }}</span>{% endif %}
+        <span class="opp">{{ 'vs' if g.home_away == 'home' else ('at' if g.home_away == 'away' else '') }} {{ g.opponent }}</span>
+        <span class="score">{{ g.score or '' }}</span>
+      </div>
+      <div class="dt">{{ g.weekday }} {{ g.date }}
+        {%- if not g.official %} &middot; scrimmage / no official result{% endif %}
+        {%- if not g.tracked %} &middot; <span style="color:#e79a9a">not tracked</span>{% endif %}</div>
+
+      {% if g.pitching %}
+      <div class="gline">
+        <span class="kv"><span class="lbl">Pitches</span><b>{{ g.pitching.pitches }}</b></span>
+        <span class="kv"><span class="lbl">Strike%</span><b>{{ g.pitching.strike_pct }}%</b></span>
+        <span class="kv"><span class="lbl">Whiff%</span><b>{{ g.pitching.whiff_pct }}%</b></span>
+        <span class="kv"><span class="lbl">Velo</span><b>{{ g.pitching.velo }}</b> <small>max {{ g.pitching.velo_max }}</small></span>
+        <span class="kv"><span class="lbl">K / BB</span><b>{{ g.pitching.k }} / {{ g.pitching.bb }}</b></span>
+      </div>
+      <div class="arms">
+        {% for a in g.pitching.arms[:4] %}
+        <b>{{ a.name }}</b> {{ a.n }}p{% if a.velo %}, {{ a.velo }} mph{% endif %},
+        {{ a.strike_pct }}% K-zone{% if a.whiff_pct is not none %}, {{ a.whiff_pct }}% whiff{% endif %}{{ '' if loop.last else ' · ' }}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if g.batting %}
+      <div class="gline">
+        <span class="kv"><span class="lbl">Hits</span><b>{{ g.batting.h }}</b> <small>{{ g.batting.xbh }} XBH</small></span>
+        <span class="kv"><span class="lbl">BB / K</span><b>{{ g.batting.bb }} / {{ g.batting.k }}</b></span>
+        <span class="kv"><span class="lbl">Whiff%</span><b>{{ g.batting.whiff_pct }}%</b></span>
+        <span class="kv"><span class="lbl">Chase%</span><b>{{ g.batting.chase_pct }}%</b></span>
+      </div>
+      {% endif %}
+      {% if g.box_url %}<div class="more">
+        {{ 'Open box score in Team Stats' if g.external_box else 'Open tracked box score' }} &rarr;</div>{% endif %}
+    {% if g.box_url %}</a>{% else %}</div>{% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="panel"><p class="empty">Nothing on record this week.</p></div>
+  {% endif %}
+
+  <!-- ============ TRENDS WORTH NOTING ============ -->
+  {% if notable %}
+  <section class="panel" style="margin-top:1.6rem">
+    <h2>Trends worth noting</h2>
+    <p class="hint">This week against each player&rsquo;s own prior weeks &mdash; computed,
+      not generated, and only moves that clear a real threshold. Green helps us, red is
+      worth a conversation. FB velo reads fastballs only, so a pitch-mix change can&rsquo;t
+      fake it.</p>
+    {% for f in notable %}
+    <div class="chg">
+      <div class="dot {{ 'good' if f.good else 'bad' }}"></div>
+      <div>
+        <div class="ttl">{{ f.player }}
+          <span class="pill flat">{{ f.side }}</span>
+          <span class="pill {{ 'ok' if f.good else 'bad' }}">
+            {{ f.metric }} {{ '+' if f.delta > 0 else '' }}{{ f.delta }}{{ f.unit if f.unit != '%' else ' pts' }}</span>
+        </div>
+        <div class="why">
+          {{ f.now }}{{ f.unit }} this week vs {{ f.base }}{{ f.unit }} across his prior
+          {{ f.weeks }} week{{ '' if f.weeks == 1 else 's' }}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+</div>
+{% endblock %}

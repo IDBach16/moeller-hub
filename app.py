@@ -432,11 +432,29 @@ def create_app():
             directions=db.GOAL_DIRECTIONS,
             categories=db.INTERVENTION_CATEGORIES)
 
+    @app.route("/season")
+    def season_page():
+        import season as season_mod
+        view = season_mod.week_view(request.args.get("week"))
+        return render_template(
+            "season.html", nav="season", view=view,
+            notable=season_mod.notable_trends(view["start"]))
+
+    @app.route("/season/game/<date>")
+    def season_game_page(date):
+        import season as season_mod
+        box = season_mod.game_box(date)
+        if not box:
+            return render_template("notfound.html"), 404
+        return render_template("season_game.html", nav="season", box=box)
+
     @app.route("/team")
     def team_page():
         import profiles
+        import season as season_mod
         return render_template("team.html", nav="team",
                                o=profiles.team_overview(_engine()),
+                               prog=season_mod.program_development(),
                                writes_enabled=writes_enabled())
 
     @app.route("/prep")

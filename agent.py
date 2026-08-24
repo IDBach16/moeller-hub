@@ -27,7 +27,10 @@ CSV_PATH = os.path.join(APP_DIR, "season_pitches.csv")
 HITTRAX_PATH = os.path.join(APP_DIR, "hittrax.csv")
 
 CHARTING_BASE = "https://moeller-charting-production.up.railway.app"
-STATS_BASE = "https://moeller-2026-stats-production.up.railway.app"
+# Overridable so local dev can point the Season page's box-score deep links
+# at a locally running copy of the stats app.
+STATS_BASE = os.environ.get(
+    "STATS_BASE", "https://moeller-2026-stats-production.up.railway.app")
 
 MODEL = "claude-opus-5"
 

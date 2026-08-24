@@ -26,6 +26,41 @@
   font-size:.78rem;color:rgba(255,255,255,.6);text-decoration:none;
 }
 .namelist a:hover{border-color:var(--gold);color:var(--gold)}
+
+/* ===== program development ===== */
+.progline{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.9rem}
+.pyear{background:rgba(15,15,30,.5);border:1px solid var(--glass-border);
+  border-radius:11px;padding:1rem 1.1rem}
+.pyear .y{font-size:.72rem;letter-spacing:.14em;color:var(--gold);
+  text-transform:uppercase;margin-bottom:.45rem}
+.pyear .v{font-family:ui-monospace,Consolas,monospace;font-size:1.6rem;font-weight:800;line-height:1}
+.pyear .v small{font-size:.66rem;font-weight:400;color:rgba(255,255,255,.4)}
+.pyear .kv{display:flex;gap:1rem;margin-top:.55rem;font-family:ui-monospace,Consolas,monospace;
+  font-size:.72rem;color:rgba(255,255,255,.65)}
+.pyear .kv span b{color:rgba(255,255,255,.9)}
+
+.cls-row{display:grid;grid-template-columns:110px 1fr 210px;gap:1rem;
+  align-items:center;padding:.65rem 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.cls-row:last-of-type{border-bottom:none}
+.cls-row .nm{font-size:.88rem;font-weight:600}
+.cls-row .nm small{display:block;font-size:.68rem;color:rgba(255,255,255,.4);font-weight:400}
+.strip{position:relative;height:26px;background:rgba(255,255,255,.05);border-radius:7px}
+.strip i{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;
+  transform:translate(-50%,-50%);background:var(--gold);opacity:.75;
+  border:1.5px solid var(--navy-deep)}
+.strip .md{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--white);
+  opacity:.65;border-radius:2px;transform:translateX(-50%)}
+.cls-row .vals{font-family:ui-monospace,Consolas,monospace;font-size:.76rem;
+  color:rgba(255,255,255,.75);text-align:right;line-height:1.6}
+.cls-row .vals b{color:var(--white);font-size:.92rem}
+.axis{display:flex;justify-content:space-between;font-family:ui-monospace,Consolas,monospace;
+  font-size:.64rem;color:rgba(255,255,255,.35);margin:.3rem 0 0;
+  grid-column:2}
+.delta{font-family:ui-monospace,Consolas,monospace;font-weight:700}
+.delta.up{color:#8fd9a4}
+.delta.down{color:#e79a9a}
+@media(max-width:760px){.cls-row{grid-template-columns:80px 1fr;grid-auto-rows:auto}
+  .cls-row .vals{grid-column:1/-1;text-align:left}}
 </style>
 {% endblock %}
 
@@ -44,6 +79,84 @@
     <div class="stat"><div class="n">{{ o.counts.active_goals }}</div><div class="l">Active goals</div></div>
     <div class="stat"><div class="n">{{ o.counts.open_reviews }}</div><div class="l">Names to review</div></div>
   </div>
+
+  <!-- ============ PROGRAM DEVELOPMENT ============ -->
+  {% if prog and prog.line %}
+  <section class="panel">
+    <h2>The program line</h2>
+    <p class="hint">Median across every arm with a real season sample
+      ({{ 40 }}+ tracked pitches) &mdash; the program, season over season.</p>
+    <div class="progline">
+      {% for y in prog.line %}
+      <div class="pyear">
+        <div class="y">{{ y.year }} &middot; {{ y.arms }} arms</div>
+        <div class="v">{{ y.fb_velo }}<small> median FB mph</small></div>
+        <div class="kv">
+          <span>strike <b>{{ y.strike_pct }}%</b></span>
+          <span>whiff <b>{{ y.whiff_pct }}%</b></span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>What a Moeller arm looks like, by class</h2>
+    <p class="hint">Each pitcher once &mdash; his most recent tracked season, in the
+      class he was that season &mdash; as a dot on one velocity scale; the white tick
+      is the class median. Hover a dot for who and what year.</p>
+    {% for b in prog.benchmarks %}
+    <div class="cls-row">
+      <div class="nm">{{ b.cls }}<small>{{ b.n }} pitcher-season{{ '' if b.n == 1 else 's' }}</small></div>
+      <div class="strip">
+        {% for d in b.dots %}
+        <i style="left:{{ d.x }}%" title="{{ d.name }} {{ d.year }} — {{ d.velo }} mph"></i>
+        {% endfor %}
+        {% if b.fb_velo is not none %}
+        <span class="md" style="left:{{ (100 * (b.fb_velo - prog.scale.lo) / (prog.scale.hi - prog.scale.lo))|round(1) }}%"></span>
+        {% endif %}
+      </div>
+      <div class="vals">
+        {% if b.fb_velo is not none %}
+        <b>{{ b.fb_velo }}</b> median FB &middot; {{ b.fb_lo }}&ndash;{{ b.fb_hi }}<br/>
+        strike {{ b.strike_pct }}% &middot; whiff {{ b.whiff_pct }}%
+        {% else %}<span class="muted">no tracked seasons yet</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    <div class="cls-row" style="border:none;padding-top:.2rem">
+      <span></span>
+      <div class="axis"><span>{{ prog.scale.lo|int }} mph</span><span>{{ ((prog.scale.lo + prog.scale.hi) / 2)|int }}</span><span>{{ prog.scale.hi|int }} mph</span></div>
+    </div>
+  </section>
+
+  {% if prog.yoy %}
+  <section class="panel">
+    <h2>Year over year &mdash; who moved</h2>
+    <p class="hint">Same arm, consecutive tracked seasons, fastballs only. This is the
+      development receipt: the off-season work either shows up here or it didn&rsquo;t happen.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Pitcher</th><th>Seasons</th><th>Class</th>
+        <th>FB velo</th><th>&Delta; velo</th><th>Strike%</th><th>&Delta; strike</th></tr></thead>
+      <tbody>
+      {% for r in prog.yoy %}
+      <tr>
+        <td>{{ r.name }}</td>
+        <td class="mono">{{ r.pair }}</td>
+        <td>{{ r.cls or '—' }}</td>
+        <td class="mono">{{ r.velo_from }} &rarr; <b>{{ r.velo_to }}</b></td>
+        <td class="delta {{ 'up' if r.delta > 0 else 'down' }}">{{ '+' if r.delta > 0 else '' }}{{ r.delta }}</td>
+        <td class="mono">{{ r.strike_from }} &rarr; {{ r.strike_to }}%</td>
+        <td class="delta {{ 'up' if r.strike_delta and r.strike_delta > 0 else 'down' }}">
+          {%- if r.strike_delta is not none %}{{ '+' if r.strike_delta > 0 else '' }}{{ r.strike_delta }}{% else %}&mdash;{% endif -%}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+  {% endif %}
+  {% endif %}
 
   <section class="panel">
     <h2>Recent changes across the roster</h2>

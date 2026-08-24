@@ -241,10 +241,16 @@ check("unknown player 404s", r.status_code == 404, f"got {r.status_code}")
 # Nav is present on every page and marks the current section.
 r = client.get("/team")
 body = r.get_data(as_text=True)
-for item in ["Players", "Team Dev", "Game Prep", "Video", "Applications"]:
+for item in ["Players", "Season", "Team Dev", "Game Prep", "Video", "Applications"]:
     check(f"  nav item present: {item}", f">{item}<" in body)
 # Sidebar shell (2026-08-23): links are .nlink with the class before the href.
 check("  current section marked active", 'class="nlink active" href="/team"' in body)
+
+# The Season page: weekly games with a pinnable test week (any mid-season date
+# picks that week), so it stays testable from the off-season.
+r = client.get("/season?week=2026-04-15")
+check("  /season renders a pinned mid-season week", r.status_code == 200
+      and "Apr 13" in r.get_data(as_text=True))
 
 # Data Collection was taken off the nav (Ian, 2026-08-19): the roster now comes
 # from the school's roster pages, so coaches have no reason to land there. The

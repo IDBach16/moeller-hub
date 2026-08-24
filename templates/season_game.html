@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ box.opponent }} {{ box.date }} — Moeller Baseball Analytics{% endblock %}
+
+{% block head %}
+<style>
+.page{max-width:1400px}
+.bx-head{display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap;margin-bottom:.3rem}
+.bx-head h1{font-size:1.7rem;font-weight:800}
+.bx-head .score{font-family:ui-monospace,Consolas,monospace;font-size:1.5rem;font-weight:800}
+.res{display:inline-block;width:26px;height:26px;border-radius:7px;text-align:center;
+  line-height:26px;font-size:.8rem;font-weight:800;vertical-align:.15em}
+.res.W{background:rgba(120,200,140,.2);color:#8fd9a4}
+.res.L{background:rgba(231,154,154,.2);color:#e79a9a}
+.bx-sub{color:rgba(255,255,255,.5);font-size:.85rem;margin-bottom:1.4rem}
+.linescore{display:inline-grid;grid-template-columns:auto repeat(3,3.2rem);
+  gap:.15rem 0;margin:0 0 1.6rem;font-family:ui-monospace,Consolas,monospace;
+  font-size:.85rem;background:var(--glass);border:1px solid var(--glass-border);
+  border-radius:10px;padding:.7rem 1rem}
+.linescore span{text-align:right;padding:.1rem .4rem}
+.linescore .hdr{color:var(--gold);font-size:.62rem;letter-spacing:.12em;
+  text-transform:uppercase}
+.linescore .tm{text-align:left;font-family:inherit;font-weight:600;padding-right:1rem}
+.bx-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:1.2rem}
+.bx-grid h2 small{font-weight:400;font-size:.72rem;color:rgba(255,255,255,.4);margin-left:.4rem}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+  <div class="bx-head">
+    {% if box.result %}<span class="res {{ box.result }}">{{ box.result }}</span>{% endif %}
+    <h1>{{ 'vs' if box.home_away == 'home' else ('at' if box.home_away == 'away' else '') }} {{ box.opponent }}</h1>
+    <span class="score">{{ box.score or '' }}</span>
+    <div class="spacer" style="flex:1"></div>
+    <a href="/season?week={{ box.week }}" class="btn ghost">&larr; Back to that week</a>
+  </div>
+  <p class="bx-sub">{{ box.weekday }} {{ box.date }} &middot; {{ box.pitches }} tracked pitches
+    {%- if not box.result %} &middot; scrimmage / no official result{% endif %}</p>
+
+  {% if box.line %}
+  <div class="linescore">
+    <span class="tm hdr"></span><span class="hdr">R</span><span class="hdr">H</span><span class="hdr">E</span>
+    <span class="tm">Moeller</span><span>{{ box.line.us_r }}</span><span>{{ box.line.us_h }}</span><span>{{ box.line.us_e }}</span>
+    <span class="tm">{{ box.opponent }}</span><span>{{ box.line.them_r }}</span><span>{{ box.line.them_h }}</span><span>{{ box.line.them_e }}</span>
+  </div>
+  {% endif %}
+
+  <div class="bx-grid">
+    <section class="panel">
+      <h2>Moeller hitting <small>vs their arms</small></h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Batter</th><th>PA</th><th>H</th><th>2B</th><th>3B</th><th>HR</th><th>BB</th><th>K</th><th>Whiff%</th></tr></thead>
+        <tbody>
+        {% for r in box.moe_batting %}
+        <tr><td>{{ r.name }}</td><td class="mono">{{ r.pa }}</td>
+          <td class="mono">{{ r.h }}</td><td class="mono">{{ r.db }}</td>
+          <td class="mono">{{ r.tr }}</td><td class="mono">{{ r.hr }}</td>
+          <td class="mono">{{ r.bb }}</td><td class="mono">{{ r.k }}</td>
+          <td class="mono">{{ r.whiff_pct if r.whiff_pct is not none else '—' }}%</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h2>Moeller pitching</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Pitcher</th><th>P</th><th>Velo</th><th>Max</th><th>Strike%</th><th>Whiff%</th><th>K</th><th>BB</th><th>H</th></tr></thead>
+        <tbody>
+        {% for r in box.moe_pitching %}
+        <tr><td>{{ r.name }}</td><td class="mono">{{ r.n }}</td>
+          <td class="mono">{{ r.velo if r.velo is not none else '—' }}</td>
+          <td class="mono">{{ r.velo_max if r.velo_max is not none else '—' }}</td>
+          <td class="mono">{{ r.strike_pct }}%</td>
+          <td class="mono">{{ r.whiff_pct if r.whiff_pct is not none else '—' }}%</td>
+          <td class="mono">{{ r.k }}</td><td class="mono">{{ r.bb }}</td>
+          <td class="mono">{{ r.h_allowed }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h2>{{ box.opponent }} pitching <small>what our hitters saw</small></h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Pitcher</th><th>P</th><th>Velo</th><th>Max</th><th>Strike%</th><th>Whiff%</th><th>K</th><th>BB</th><th>H</th></tr></thead>
+        <tbody>
+        {% for r in box.opp_pitching %}
+        <tr><td>{{ r.name }}</td><td class="mono">{{ r.n }}</td>
+          <td class="mono">{{ r.velo if r.velo is not none else '—' }}</td>
+          <td class="mono">{{ r.velo_max if r.velo_max is not none else '—' }}</td>
+          <td class="mono">{{ r.strike_pct }}%</td>
+          <td class="mono">{{ r.whiff_pct if r.whiff_pct is not none else '—' }}%</td>
+          <td class="mono">{{ r.k }}</td><td class="mono">{{ r.bb }}</td>
+          <td class="mono">{{ r.h_allowed }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h2>{{ box.opponent }} hitting <small>vs our arms</small></h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Batter</th><th>PA</th><th>H</th><th>2B</th><th>3B</th><th>HR</th><th>BB</th><th>K</th><th>Whiff%</th></tr></thead>
+        <tbody>
+        {% for r in box.opp_batting %}
+        <tr><td>{{ r.name }}</td><td class="mono">{{ r.pa }}</td>
+          <td class="mono">{{ r.h }}</td><td class="mono">{{ r.db }}</td>
+          <td class="mono">{{ r.tr }}</td><td class="mono">{{ r.hr }}</td>
+          <td class="mono">{{ r.bb }}</td><td class="mono">{{ r.k }}</td>
+          <td class="mono">{{ r.whiff_pct if r.whiff_pct is not none else '—' }}%</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+  </div>
+</div>
+{% endblock %}
