@@ -98,8 +98,8 @@ def roster_cards(engine):
                 db.sessions, db.sessions.c.id == db.pitch_metrics.c.session_id))
             .where(db.sessions.c.source == "rapsodo")
             .where(db.pitch_metrics.c.metric_key.in_(
-                ["velocity", "induced_vertical_break",
-                 "horizontal_break", "spin_axis", "is_strike"]))).all()
+                ["velocity", "induced_vertical_break", "horizontal_break",
+                 "spin_axis", "is_strike", "spin_rate", "spin_efficiency"]))).all()
         levels = {r.player_id: r.level for r in conn.execute(
             select(db.player_seasons.c.player_id, db.player_seasons.c.level))}
 
@@ -128,6 +128,11 @@ def roster_cards(engine):
         card["mix"].append({
             "pt": pt, "n": len(velos),
             "velo": round(sum(velos) / len(velos), 1),
+            "max": round(max(velos), 1),
+            "spin": round(sum(d["spin_rate"]) / len(d["spin_rate"]))
+                    if d.get("spin_rate") else None,
+            "eff": round(sum(d["spin_efficiency"]) / len(d["spin_efficiency"]))
+                   if d.get("spin_efficiency") else None,
             "ivb": round(sum(d["induced_vertical_break"]) / len(d["induced_vertical_break"]), 1)
                    if d.get("induced_vertical_break") else None,
             "hb": round(sum(d["horizontal_break"]) / len(d["horizontal_break"]), 1)

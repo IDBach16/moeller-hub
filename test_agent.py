@@ -145,6 +145,33 @@ else:
     check("  says so plainly when there is no Rapsodo data",
           ars.get("note") and "no" in ars["note"].lower())
 
+# The comparison layer. The trap here is handedness: a lefty's horizontal
+# break is negative BY DEFINITION, so comparing the raw sign across arms
+# measures which hand they throw with, not their stuff.
+rows = agent._staff_pitch_rows("FB")
+if rows:
+    check("staff rows carry handedness", all("throws" in r for r in rows))
+    check("  and run as a magnitude",
+          all(r["arm_side_run"] is None or r["arm_side_run"] >= 0 for r in rows))
+    lb = agent.tool_staff_leaderboard("hb", "FB", 5)
+    check("  a run leaderboard ranks magnitude, not sign",
+          all(r.get("arm_side_run", 0) >= 0 for r in lb["rows"]))
+    check("  and says why", "handedness" in (lb.get("note") or ""))
+
+check("compare needs at least two arms",
+      "error" in agent.tool_compare_pitchers(["Jack Ujvagi"]))
+check("  and refuses a crowd", "error" in agent.tool_compare_pitchers(
+      ["a", "b", "c", "d", "e"]))
+bad = agent.tool_staff_leaderboard("nonsense")
+check("  an unrankable field is refused with the options",
+      "error" in bad and "options" in bad)
+bench = agent.tool_benchmark("Jack Ujvagi")
+check("benchmark answers for a tracked or untracked arm",
+      "has_fastball_data" in bench or "error" in bench)
+if bench.get("has_fastball_data"):
+    check("  and is JSON-safe (no numpy leaking out)",
+          json.dumps(bench) and True)
+
 # The write layer: the agent DRAFTS, the coach confirms. A proposal tool must
 # validate exactly like the write path, and must not touch the database.
 before = agent.tool_goals_and_interventions("Jack Ujvagi")

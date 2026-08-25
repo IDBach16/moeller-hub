@@ -747,6 +747,187 @@ def tool_stuff_plus(player=None):
             "min_reps": data.get("min_reps")}
 
 
+# What a staff row can be ranked or compared on. "stuff" is handled apart --
+# it comes from the Rapsodo app, not the pitch table.
+COMPARE_FIELDS = ("velo", "max", "spin", "eff", "ivb", "hb", "pct", "n")
+FIELD_WORDS = {"velo": "average velocity", "max": "top velocity",
+               "spin": "spin rate", "eff": "spin efficiency",
+               "ivb": "induced vertical break", "hb": "horizontal break",
+               "pct": "usage share", "n": "pitches tracked",
+               "arm_side_run": "arm-side run", "stuff": "Stuff+"}
+
+
+def _staff_pitch_rows(pitch):
+    """One row per pitcher for a single pitch type, from one query."""
+    import profiles
+    import rapsodo_card
+    engine = _engine()
+    cards = rapsodo_card.roster_cards(engine)
+    roster = {p["id"]: p for p in profiles.roster(engine)}
+    rows = []
+    for pid, c in cards.items():
+        m = next((x for x in c["mix"] if x["pt"] == pitch), None)
+        if not m or pid not in roster:
+            continue
+        r = {"player_id": pid, "player": roster[pid]["name"],
+             "throws": roster[pid].get("throws"),
+             "level": c.get("level"), "slot": c.get("slot"),
+             **{k: m.get(k) for k in COMPARE_FIELDS}}
+        # A lefty's horizontal break is negative by definition. Comparing the
+        # raw sign across arms measures handedness, not stuff, so carry the
+        # magnitude for comparison and keep the signed value for shape.
+        r["arm_side_run"] = abs(r["hb"]) if r.get("hb") is not None else None
+        rows.append(r)
+    return rows
+
+
+def _stuff_by_player(pitch):
+    """{player_id: stuff+} for one pitch, or {} if the service is unreachable."""
+    out = tool_stuff_plus()
+    if not isinstance(out, dict) or "staff_board" not in out:
+        return {}
+    try:
+        r = rq.get(RAPSODO_BASE + "/api/stuff", timeout=25)
+        rows = r.json().get("rows") or []
+    except Exception:                                       # noqa: BLE001
+        return {}
+    return {x["player_id"]: x["stuff"] for x in rows if x.get("pt") == pitch}
+
+
+def tool_compare_pitchers(players, pitch="FB"):
+    """Two to four pitchers side by side on ONE pitch type.
+
+    One pitch type because a fastball's numbers and a slider's are different
+    measurements -- comparing across them says nothing.
+    """
+    if isinstance(players, str):
+        players = [p.strip() for p in players.split(",") if p.strip()]
+    if not players or len(players) < 2:
+        return {"error": "name at least two pitchers to compare"}
+    if len(players) > 4:
+        return {"error": "compare at most four at a time"}
+
+    ids, unresolved = {}, []
+    for name in players:
+        row, err = _resolve(name)
+        if err:
+            unresolved.append({name: err.get("error")})
+        else:
+            ids[row.id] = f"{row.first_name} {row.last_name}"
+
+    rows = {r["player_id"]: r for r in _staff_pitch_rows(pitch)}
+    stuff = _stuff_by_player(pitch)
+    out, missing = [], []
+    for pid, name in ids.items():
+        r = rows.get(pid)
+        if not r:
+            missing.append(name)
+            continue
+        out.append({"player": name, "throws": r["throws"], "level": r["level"],
+                    "arm_slot": r["slot"], "n": r["n"], "usage_pct": r["pct"],
+                    "velo": r["velo"], "max_velo": r["max"], "spin": r["spin"],
+                    "spin_eff_pct": r["eff"], "ivb": r["ivb"],
+                    "hb_signed": r["hb"], "arm_side_run": r["arm_side_run"],
+                    "stuff_plus": stuff.get(pid)})
+    if not out:
+        return {"error": f"none of them has tracked {pitch} data",
+                "asked_for": players}
+
+    # The gaps, so the model doesn't do arithmetic in its head.
+    gaps = {}
+    for key in ("velo", "ivb", "arm_side_run", "spin", "spin_eff_pct",
+                "stuff_plus"):
+        vals = [(x["player"], x.get(key)) for x in out if x.get(key) is not None]
+        if len(vals) >= 2:
+            hi = max(vals, key=lambda v: v[1])
+            lo = min(vals, key=lambda v: v[1])
+            gaps[key] = {"highest": hi[0], "lowest": lo[0],
+                         "spread": round(hi[1] - lo[1], 1)}
+
+    res = {"pitch": pitch, "pitchers": out, "spreads": gaps,
+           "note": ("Bullpen data, one pitch type. hb_signed is negative for a "
+                    "lefty by definition -- compare arm_side_run, not the sign. "
+                    "Stuff+ is on the program scale (100 = average Moeller "
+                    "pitch) and grades shape, not command.")}
+    if missing:
+        res["no_tracked_data_for_this_pitch"] = missing
+    if unresolved:
+        res["unresolved"] = unresolved
+    return res
+
+
+def tool_staff_leaderboard(field="velo", pitch="FB", limit=10):
+    """Rank the staff on one number for one pitch type."""
+    if field == "stuff":
+        board = tool_stuff_plus()
+        if "error" in board:
+            return board
+        rows = [b for b in board["staff_board"] if b["pitch"].upper().startswith(
+            {"FB": "FAST", "SI": "SINK", "CT": "CUT", "SL": "SLID",
+             "CB": "CURV", "CH": "CHANGE", "SP": "SPLIT"}.get(pitch, ""))]
+        return {"ranking_by": "Stuff+", "pitch": pitch,
+                "rows": rows[:limit], "scale": board.get("scale")}
+    if field not in COMPARE_FIELDS:
+        return {"error": f"cannot rank on '{field}'",
+                "options": list(COMPARE_FIELDS) + ["stuff"]}
+
+    if field == "hb":
+        field = "arm_side_run"      # magnitude; the raw sign is handedness
+    rows = [r for r in _staff_pitch_rows(pitch) if r.get(field) is not None]
+    rows.sort(key=lambda r: -r[field])
+    return {"ranking_by": FIELD_WORDS.get(field, field), "pitch": pitch,
+            "pitchers_with_data": len(rows),
+            "rows": [{"rank": i, "player": r["player"], "level": r["level"],
+                      field: r[field], "n": r["n"]}
+                     for i, r in enumerate(rows[:limit], 1)],
+            "note": ("Ranked on run by magnitude: a lefty's horizontal break is "
+                     "negative by definition, so the sign would rank handedness."
+                     if field == "arm_side_run" else None)}
+
+
+def tool_benchmark(player):
+    """Where one pitcher sits against his class and the program."""
+    import season
+    row, err = _resolve(player)
+    if err:
+        return err
+    name = f"{row.first_name} {row.last_name}"
+
+    rows = _staff_pitch_rows("FB")
+    mine = next((r for r in rows if r["player_id"] == row.id), None)
+    if not mine:
+        return {"player": name, "has_fastball_data": False,
+                "note": "No tracked fastballs for him yet, so nothing to compare."}
+
+    velos = sorted(r["velo"] for r in rows if r.get("velo") is not None)
+    below = sum(1 for v in velos if v < mine["velo"])
+    pct = int(round(100.0 * below / (len(velos) - 1))) if len(velos) > 1 else None
+
+    prog = season.program_development()
+    bench = [b for b in prog["benchmarks"] if b["n"]]
+    yoy = [{"seasons": r["pair"], "fb_velo": [r["velo_from"], r["velo_to"]],
+            "delta": r["delta"]} for r in prog["yoy"] if r["name"] == name]
+
+    return {
+        "player": name, "has_fastball_data": True, "level": mine["level"],
+        "his_fastball": {"velo": mine["velo"], "max": mine["max"],
+                         "ivb": mine["ivb"], "hb": mine["hb"],
+                         "spin": mine["spin"], "eff_pct": mine["eff"],
+                         "arm_slot": mine["slot"], "n": mine["n"]},
+        "staff_percentile_by_velo": pct,
+        "staff_pitchers_compared": len(velos),
+        "class_benchmarks_median_fb_velo": {
+            b["cls"]: (float(b["fb_velo"]) if b["fb_velo"] is not None else None)
+            for b in bench},
+        "program_season_medians": [
+            {k: (float(v) if hasattr(v, "dtype") else v) for k, v in y.items()}
+            for y in prog["line"]],
+        "his_year_over_year": yoy,
+        "note": ("Percentile is against Moeller arms with tracked fastballs, not "
+                 "against any outside population."),
+    }
+
+
 def tool_group_overview(side):
     """Coverage, changes, benchmarks and arsenals for one side of the roster.
 
@@ -822,6 +1003,10 @@ TOOL_IMPLS = {
     # pitch layer -- what his stuff actually does
     "pitch_arsenal": tool_pitch_arsenal,
     "stuff_plus": tool_stuff_plus,
+    # comparison layer -- against each other, and against the program
+    "compare_pitchers": tool_compare_pitchers,
+    "staff_leaderboard": tool_staff_leaderboard,
+    "benchmark": tool_benchmark,
     # group layer -- the pitching-staff / hitting-group read
     "group_overview": tool_group_overview,
     # navigation layer -- the assistant is also the hub's front door
@@ -1129,6 +1314,58 @@ TOOLS = [
         },
     },
     {
+        "name": "compare_pitchers",
+        "description": "Two to four pitchers side by side on ONE pitch type: "
+                       "velocity, max, spin, spin efficiency, induced vertical and "
+                       "horizontal break, usage, arm slot and Stuff+, plus the spread "
+                       "between them on each. Always one pitch type -- a fastball's "
+                       "numbers and a slider's are different measurements.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "players": {"type": "array", "items": {"type": "string"},
+                            "description": "2-4 player names"},
+                "pitch": {"type": "string",
+                          "enum": ["FB", "SI", "CT", "SL", "CB", "CH", "SP"],
+                          "description": "defaults to FB"},
+            },
+            "required": ["players"],
+        },
+    },
+    {
+        "name": "staff_leaderboard",
+        "description": "Rank the staff on one number for one pitch type -- who throws "
+                       "hardest, who has the most ride, the best spin efficiency, the "
+                       "highest Stuff+. Use for any 'who has the most/best X' question.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "field": {"type": "string",
+                          "enum": ["velo", "max", "spin", "eff", "ivb", "hb",
+                                   "pct", "n", "stuff"],
+                          "description": "velo, max, spin, eff (spin efficiency), "
+                                         "ivb, hb, pct (usage), n, or stuff (Stuff+)"},
+                "pitch": {"type": "string",
+                          "enum": ["FB", "SI", "CT", "SL", "CB", "CH", "SP"]},
+                "limit": {"type": "integer"},
+            },
+        },
+    },
+    {
+        "name": "benchmark",
+        "description": "Where one pitcher sits against the program: his fastball line, "
+                       "his percentile among Moeller arms, the median fastball by class "
+                       "(what a Moeller freshman/sophomore/junior/senior looks like), "
+                       "the program's season medians, and his own year-over-year change. "
+                       "Use for 'how does he compare to a typical Moeller junior' or "
+                       "'is he where he should be'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"player": {"type": "string"}},
+            "required": ["player"],
+        },
+    },
+    {
         "name": "group_overview",
         "description": "The across-players picture for ONE side of the roster "
                        "('pitching' or 'hitting'): how many players have training "
@@ -1176,6 +1413,9 @@ TWO LAYERS OF DATA
 Player development — training sessions, detected changes, goals and interventions:
 - find_player, player_snapshot, what_changed, metric_history, compare_windows,
   goals_and_interventions, roster_alerts, protocol_status, player_summary.
+- compare_pitchers, staff_leaderboard and benchmark are the COMPARISON layer: arms
+  against each other, against the staff, and against the program's own class
+  benchmarks. Reach for these rather than calling a per-player tool repeatedly.
 - pitch_arsenal and stuff_plus are the PITCH-LEVEL layer. Any question about what a
   pitcher throws, what one of his pitches does, or how a pitch is trending goes to
   pitch_arsenal -- the session tools only carry pooled averages, which move whenever
