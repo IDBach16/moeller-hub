@@ -119,6 +119,27 @@ def create_app():
     except Exception as e:                                   # pragma: no cover
         print(f"[startup] database not ready: {e}", flush=True)
 
+    # Name -> slug for every player, so an agent reply can turn "Seth Maybury"
+    # into a link to his profile. Small and slow-changing; cached in-process.
+    _roster_cache = {"at": 0.0, "rows": []}
+
+    @app.context_processor
+    def inject_chat_roster():
+        import time as _t
+        from sqlalchemy import select as _select
+        if _t.time() - _roster_cache["at"] > 300:
+            try:
+                with _engine().connect() as conn:
+                    _roster_cache["rows"] = [
+                        {"name": f"{r.first_name} {r.last_name}", "slug": r.slug}
+                        for r in conn.execute(_select(
+                            db.players.c.first_name, db.players.c.last_name,
+                            db.players.c.slug))]
+                _roster_cache["at"] = _t.time()
+            except Exception:                               # noqa: BLE001
+                pass                                        # links are a nicety
+        return {"chat_roster": _roster_cache["rows"]}
+
     # -----------------------------------------------------------------------
     # Password gate
     # -----------------------------------------------------------------------

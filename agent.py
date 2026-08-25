@@ -947,7 +947,10 @@ def tool_app_links(player=None):
     import tools as registry
     out = {
         "how_to_cite": "Write a link as [[Label|URL]] -- the chat renders it "
-                       "as a clickable link. Only use URLs from this tool.",
+                       "as a clickable link. Only use URLs from this tool. The "
+                       "second half must be an actual URL copied from below; a "
+                       "description of where the URL came from is not a URL, "
+                       "and a link you cannot fill in should just be plain text.",
         "hub_pages": {
             "players roster": "/players",
             "team development (roster-wide changes, protocol gaps)": "/team",
@@ -1525,7 +1528,10 @@ FOCUS_WORDS = {
 HUB_ROUTES = ("/players", "/team", "/season", "/prep", "/video", "/tools",
               "/collect")
 
-_LINK = re.compile(r"\[\[([^\]|]{1,120})\|([^\]\s]{1,300})\]\]")
+# The URL half allows spaces on purpose: a model once wrote "from app_links"
+# where a URL goes, and a stricter pattern simply didn't match, leaving raw
+# [[...]] syntax in the reply. Matching it here means it degrades to its label.
+_LINK = re.compile(r"\[\[([^\]|]{1,120})\|([^\]]{1,300})\]\]")
 
 
 def _allowed_hosts():
@@ -1549,7 +1555,9 @@ def _sanitize_links(text):
     hosts = _allowed_hosts()
 
     def keep(m):
-        label, url = m.group(1), m.group(2)
+        label, url = m.group(1), m.group(2).strip()
+        if re.search(r"\s", url):       # a phrase, not a URL -- label only
+            return label
         if url.startswith("/"):
             ok = url == "/" or any(url == r or url.startswith(r + "/")
                                    for r in HUB_ROUTES)

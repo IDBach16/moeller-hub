@@ -326,22 +326,10 @@ a.wk-game:hover .wg-opp{color:var(--gold)}
     if(chip){input.value=chip.textContent;ask();}
   });
 
-  // The assistant cites deeplinks as [[Label|URL]]. Everything is escaped
-  // first, then only that pattern becomes an anchor -- and only for URLs that
-  // are hub-relative or https, so the model can't inject markup or javascript:.
-  function linkify(text){
-    const esc=t=>t.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    return esc(text).replace(/\[\[([^\]|]{1,120})\|([^\]\s]{1,300})\]\]/g,(m,label,url)=>{
-      if(!/^(\/[^\/]|https:\/\/)/.test(url)) return label;
-      const ext=url.startsWith('https:');
-      return '<a href="'+url+'"'+(ext?' target="_blank" rel="noopener"':'')+'>'+label+'</a>';
-    });
-  }
-
   function bubble(cls,text){
     const hint=msgs.querySelector('.ca-hint'); if(hint)hint.remove();
     const el=document.createElement('div'); el.className='ca-msg '+cls;
-    if(cls==='ca-bot'){ el.innerHTML=linkify(text); } else { el.textContent=text; }
+    if(cls==='ca-bot'){ el.innerHTML=MoeChat.render(text); } else { el.textContent=text; }
     msgs.appendChild(el); msgs.scrollTop=msgs.scrollHeight; return el;
   }
 

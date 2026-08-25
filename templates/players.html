@@ -365,20 +365,10 @@
   const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g,
     c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-  function linkify(text){
-    return esc(text).replace(/\[\[([^\]|]{1,120})\|([^\]\s]{1,300})\]\]/g,
-      (m, label, url) => {
-        if(!/^(\/[^\/]|https:\/\/)/.test(url)) return label;
-        const ext = url.indexOf('https:') === 0;
-        return '<a href="' + url + '"' + (ext ? ' target="_blank" rel="noopener"' : '')
-             + '>' + label + '</a>';
-      });
-  }
-
   function bubble(cls, text){
     const el = document.createElement('div');
     el.className = 'ag-msg ' + cls;
-    if(cls === 'ag-bot'){ el.innerHTML = linkify(text); } else { el.textContent = text; }
+    if(cls === 'ag-bot'){ el.innerHTML = MoeChat.render(text); } else { el.textContent = text; }
     msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
     return el;
   }

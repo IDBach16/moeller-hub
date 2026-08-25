@@ -371,6 +371,24 @@ tr:last-child td{border-bottom:none}
 .pill.bad{background:rgba(227,127,127,.15);color:#e79a9a}
 .pill.flat{background:rgba(255,255,255,.08);color:rgba(255,255,255,.55)}
 
+/* ===== agent reply rendering (shared by both chats) ===== */
+.mc p{margin:0 0 .6rem}
+.mc p:last-child{margin-bottom:0}
+.mc ul,.mc ol{margin:.1rem 0 .7rem;padding-left:1.15rem}
+.mc li{margin:.22rem 0}
+.mc .num{font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums;
+  color:var(--white);font-weight:600}
+.mc a.pl{color:var(--gold-light);text-decoration:none;
+  border-bottom:1px dotted rgba(197,165,90,.5)}
+.mc a.pl:hover{color:var(--gold)}
+/* a "Name: 86.3 avg, 1837 spin, ..." line becomes a labelled chip row */
+.mc .statline{margin:0 0 .5rem;display:flex;gap:.4rem;flex-wrap:wrap;
+  align-items:baseline}
+.mc .statline .who{font-weight:700;font-size:.9rem}
+.mc .statline .chip{font-family:ui-monospace,Consolas,monospace;font-size:.74rem;
+  padding:.14rem .5rem;border-radius:6px;background:rgba(255,255,255,.06);
+  color:rgba(255,255,255,.85);white-space:nowrap}
+
 /* ===== FOOTER ===== */
 .footer{
   text-align:center;
@@ -450,6 +468,128 @@ tr:last-child td{border-bottom:none}
 </main>
 </div>
 
+<script id="chatRoster" type="application/json">{{ chat_roster|tojson }}</script>
+<script>
+/* One renderer for every agent reply. The model writes plain prose with dash
+   bullets; this adds the structure without asking it for markup it would get
+   subtly wrong. Everything is escaped FIRST -- nothing below ever trusts the
+   model's text as HTML. */
+window.MoeChat = (function(){
+  const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  let roster = [];
+  try{ roster = JSON.parse(document.getElementById('chatRoster').textContent) || []; }
+  catch(e){ roster = []; }
+  // Longest first so "Cooper Homoelle" wins over a bare surname.
+  roster.sort((a, b) => b.name.length - a.name.length);
+
+  // [[Label|URL]] -> anchor, for hub routes and https only. The server already
+  // strips invented hosts; this is the second half of that guarantee.
+  // The URL half deliberately allows spaces so a malformed link (a model once
+  // wrote "from app_links" where a URL goes) still matches and degrades to its
+  // label instead of showing raw [[...]] syntax to a coach.
+  function links(html){
+    return html.replace(/\[\[([^\]|]{1,120})\|([^\]]{1,300})\]\]/g,
+      (m, label, rawUrl) => {
+        const url = rawUrl.trim();
+        if(!/^(\/[^\/]|https:\/\/)/.test(url) || /\s/.test(url)) return label;
+        const ext = url.indexOf('https:') === 0;
+        return '<a class="pl" href="' + url + '"'
+             + (ext ? ' target="_blank" rel="noopener"' : '') + '>' + label + '</a>';
+      });
+  }
+
+  // Walk only the TEXT between tags, and never inside an anchor. A replace run
+  // over built HTML would happily rewrite digits inside an href
+  // (".../coach?id=523430") and corrupt the link.
+  function mapText(html, fn){
+    let depth = 0;
+    // Entities are opaque too: the digits in "&#39;" are not a number, and
+    // wrapping them in a span destroys the apostrophe.
+    return html.split(/(<[^>]*>|&[#\w]+;)/).map(part => {
+      if(part.charAt(0) === '<'){
+        if(/^<a\b/i.test(part)) depth++;
+        else if(/^<\/a>/i.test(part)) depth = Math.max(0, depth - 1);
+        return part;
+      }
+      if(/^&[#\w]+;$/.test(part)) return part;
+      return depth > 0 ? part : fn(part);
+    }).join('');
+  }
+
+  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // One pass per name, each re-splitting the HTML, so a name already turned
+  // into a link is skipped by mapText and can never be linked twice.
+  function players(html){
+    for(const p of roster){
+      const re = new RegExp('(?<![\\w-])' + reEsc(esc(p.name)) + '(?![\\w-])', 'g');
+      const a = '<a class="pl" href="/players/' + p.slug + '">' + esc(p.name) + '</a>';
+      html = mapText(html, t => t.replace(re, a));
+    }
+    return html;
+  }
+
+  // 86.3 / 92% / 1837 -- set in tabular figures so columns of them line up.
+  function numbers(html){
+    return mapText(html, t => t.replace(
+      /(?<![\w.\-])(\d+(?:\.\d+)?%?)(?![\w.\-])/g, '<span class="num">$1</span>'));
+  }
+
+  function inline(text){
+    return players(numbers(links(esc(text))));
+  }
+
+  // "Rudy Glotfelty (L): 86.3 avg, 89.7 max, 1837 spin" -> name + chips.
+  // "(R)", "(L)", "(JV)", "(varsity)" -- any short tag after the name, so one
+  // pitcher in a comparison doesn't fall out of the chip layout.
+  const STAT = /^([A-Z][\w'.-]*(?: [A-Z][\w'.-]*){0,3}(?: \([A-Za-z]{1,8}\))?):\s+(.+)$/;
+  function statline(line){
+    const m = line.match(STAT);
+    if(!m) return null;
+    const parts = m[2].split(/,\s+/).filter(Boolean);
+    // Only worth chipping when it is genuinely a row of numbers.
+    if(parts.length < 3 || !/\d/.test(m[2])) return null;
+    if(parts.some(x => x.length > 28)) return null;
+    return '<div class="statline"><span class="who">' + inline(m[1]) + '</span>'
+         + parts.map(x => '<span class="chip">' + inline(x) + '</span>').join('')
+         + '</div>';
+  }
+
+  function render(text){
+    const out = [];
+    let list = null, ordered = false;
+    const flush = () => {
+      if(list){ out.push('<' + (ordered ? 'ol' : 'ul') + '>' + list.join('')
+                        + '</' + (ordered ? 'ol' : 'ul') + '>'); list = null; }
+    };
+    for(const raw of String(text || '').split(/\n/)){
+      const line = raw.trim();
+      if(!line){ flush(); continue; }
+      const bullet = line.match(/^[-\u2022]\s+(.*)$/);
+      const num = line.match(/^(\d+)[.)]\s+(.*)$/);
+      if(bullet){
+        if(!list || ordered){ flush(); list = []; ordered = false; }
+        list.push('<li>' + inline(bullet[1]) + '</li>');
+        continue;
+      }
+      if(num){
+        if(!list || !ordered){ flush(); list = []; ordered = true; }
+        list.push('<li>' + inline(num[2]) + '</li>');
+        continue;
+      }
+      flush();
+      const stat = statline(line);
+      out.push(stat || ('<p>' + inline(line) + '</p>'));
+    }
+    flush();
+    return '<div class="mc">' + out.join('') + '</div>';
+  }
+
+  return {render: render, esc: esc};
+})();
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
