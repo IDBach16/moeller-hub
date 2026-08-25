@@ -486,3 +486,79 @@ def main(argv):
 
 if __name__ == "__main__":
     main(sys.argv[1:])
+
+
+# ---------------------------------------------------------------------------
+# Group development notes -- one for the pitching staff, one for the hitters.
+# Same rule as everywhere else: the database computes, the model explains. The
+# context below is entirely pre-computed; the model reads across it and says
+# what a coordinator should be thinking about this week.
+# ---------------------------------------------------------------------------
+
+def _group_players(engine, side):
+    """(with_data, without_data) names for one side of the roster."""
+    import profiles
+    want_pitcher = side == "pitching"
+    roster = [p for p in profiles.roster(engine)
+              if bool(p["is_pitcher"]) == want_pitcher]
+    return ([p for p in roster if p["sessions"]],
+            [p for p in roster if not p["sessions"]])
+
+
+def build_group_context(engine, side):
+    """Everything the group note is written from. Pre-computed, compact."""
+    import profiles
+    with_data, without = _group_players(engine, side)
+    ov = profiles.team_overview(engine)
+    names = {p["name"] for p in with_data} | {p["name"] for p in without}
+
+    ctx = {
+        "group": "pitching staff" if side == "pitching" else "hitting group",
+        "players_total": len(with_data) + len(without),
+        "players_with_training_data": len(with_data),
+        "players_without_any_training_data": len(without),
+        # Only this side's changes -- the roster-wide feed mixes both.
+        "recent_changes": [
+            {"player": c["player"], "summary": c["summary"],
+             "severity": c["severity"], "favorable": c["favorable"],
+             "detected_on": c["detected_on"]}
+            for c in ov["changes"] if c["player"] in names][:8],
+        "active_goals_program_wide": ov["counts"]["active_goals"],
+    }
+
+    if side == "pitching":
+        try:
+            import season
+            prog = season.program_development()
+            ctx["program_benchmarks"] = {
+                "by_class": [{"class": b["cls"], "pitchers": b["n"],
+                              "median_fb_velo": b["fb_velo"],
+                              "range": [b["fb_lo"], b["fb_hi"]]}
+                             for b in prog["benchmarks"] if b["n"]],
+                "season_medians": prog["line"],
+                "year_over_year": [{"player": r["name"], "seasons": r["pair"],
+                                    "fb_velo": [r["velo_from"], r["velo_to"]],
+                                    "delta": r["delta"]}
+                                   for r in prog["yoy"][:6]],
+            }
+        except Exception:                                   # noqa: BLE001
+            pass
+        try:
+            import rapsodo_card
+            cards = rapsodo_card.roster_cards(engine)
+            by_id = {p["id"]: p for p in with_data}
+            arms = [{"player": by_id[pid]["name"], "fb_velo": c["fb"],
+                     "fb_max": c["fb_max"], "arm_slot": c["slot"],
+                     "pitches_tracked": c["total"],
+                     "mix": {m["pt"]: str(m["pct"]) + "%" for m in c["mix"]}}
+                    for pid, c in cards.items()
+                    if pid in by_id and c.get("fb") is not None]
+            arms.sort(key=lambda a: -(a["fb_velo"] or 0))
+            ctx["bullpen_arsenals"] = arms[:12]
+        except Exception:                                   # noqa: BLE001
+            pass
+    else:
+        ctx["note"] = ("Blast and HitTrax pipelines are built but no swing data "
+                       "has landed yet, so hitting development is game data only "
+                       "until the first export arrives.")
+    return ctx

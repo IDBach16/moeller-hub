@@ -19,6 +19,56 @@
   font-size:.78rem;text-decoration:none;transition:all .2s}
 .pchip:hover{border-color:rgba(197,165,90,.45);color:var(--white)}
 .pchip small{font-size:.64rem;color:rgba(255,255,255,.35)}
+
+/* ===== side tabs ===== */
+.sidetabs{display:inline-flex;gap:.3rem;margin:.2rem 0 1.3rem;padding:.3rem;
+  background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
+  border-radius:12px}
+.sidetabs a{display:flex;align-items:center;gap:.5rem;padding:.55rem 1.15rem;
+  border-radius:9px;text-decoration:none;font-size:.86rem;font-weight:600;
+  color:rgba(255,255,255,.55);transition:all .18s}
+.sidetabs a:hover{color:var(--white)}
+.sidetabs a.on{background:var(--gold-dim);color:var(--gold)}
+.sidetabs a .c{font-family:ui-monospace,Consolas,monospace;font-size:.7rem;
+  color:rgba(255,255,255,.4)}
+.sidetabs a.on .c{color:var(--gold-light)}
+
+/* ===== group coordinator chat ===== */
+.agent{background:var(--glass);border:1px solid var(--glass-border);
+  border-radius:14px;margin-bottom:1.6rem;overflow:hidden}
+.agent-head{display:flex;align-items:center;gap:.6rem;padding:1rem 1.3rem .2rem}
+.agent-head h2{font-size:1rem;font-weight:700}
+.agent-head .tag{font-family:ui-monospace,Consolas,monospace;font-size:.6rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--gold);
+  background:var(--gold-dim);border-radius:99px;padding:.2rem .6rem}
+.agent-head .hint{margin:0;font-size:.76rem;color:rgba(255,255,255,.4)}
+.ag-msgs{display:flex;flex-direction:column;gap:.55rem;padding:.9rem 1.3rem;
+  max-height:420px;overflow-y:auto}
+.ag-msgs:empty{display:none}
+.ag-msg{max-width:88%;padding:.6rem .85rem;border-radius:12px;font-size:.88rem;
+  line-height:1.55;white-space:pre-wrap;word-wrap:break-word}
+.ag-me{align-self:flex-end;background:var(--gold-dim);
+  border:1px solid var(--glass-border);border-bottom-right-radius:4px}
+.ag-bot{align-self:flex-start;background:rgba(15,15,30,.6);
+  border:1px solid rgba(255,255,255,.08);border-bottom-left-radius:4px}
+.ag-bot a{color:var(--gold-light);text-decoration:underline;text-underline-offset:2px}
+.ag-typing{align-self:flex-start;color:var(--gold);letter-spacing:.2em;
+  padding:.3rem 1.3rem;animation:agPulse 1.2s ease-in-out infinite}
+@keyframes agPulse{0%,100%{opacity:.35}50%{opacity:1}}
+.ag-chips{display:flex;gap:.45rem;flex-wrap:wrap;padding:.5rem 1.3rem .2rem}
+.ag-chip{padding:.42rem .8rem;border:1px solid var(--glass-border);
+  border-radius:999px;color:var(--gold);font-size:.77rem;cursor:pointer;
+  user-select:none;transition:all .2s}
+.ag-chip:hover{background:var(--gold-dim);border-color:var(--gold)}
+.ag-input{display:flex;gap:.5rem;padding:.8rem 1.3rem 1rem}
+.ag-input input{flex:1;padding:.65rem .85rem;background:rgba(15,15,30,.75);
+  border:1px solid var(--glass-border);border-radius:9px;color:var(--white);
+  font-size:.92rem;font-family:inherit;outline:none}
+.ag-input input:focus{border-color:var(--gold)}
+.ag-input button{padding:.65rem 1.2rem;border:none;border-radius:9px;cursor:pointer;
+  background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy);
+  font-weight:700;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+.ag-input button:disabled{opacity:.5;cursor:wait}
 .pcard{
   display:block;text-decoration:none;color:var(--white);
   background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;
@@ -94,19 +144,54 @@
     what has changed against his own baseline.
   </p>
 
+  {% set pitchers = roster|selectattr('is_pitcher')|list %}
+  {% set hitters = roster|rejectattr('is_pitcher')|list %}
+  {% set shown = pitchers if side == 'pitching' else hitters %}
+
+  <div class="sidetabs">
+    <a href="/players?side=pitching" class="{{ 'on' if side == 'pitching' }}">
+      Pitchers <span class="c">{{ pitchers|length }}</span></a>
+    <a href="/players?side=hitting" class="{{ 'on' if side == 'hitting' }}">
+      Hitters <span class="c">{{ hitters|length }}</span></a>
+  </div>
+
+  <!-- ===== group coordinator: ask it anything about this group ===== -->
+  <section class="agent">
+    <div class="agent-head">
+      <h2>{{ 'Pitching' if side == 'pitching' else 'Hitting' }} development</h2>
+      <span class="tag">agent</span>
+      <p class="hint">Knows this group &mdash; coverage, who&rsquo;s trending,
+        benchmarks, and every player&rsquo;s data.</p>
+    </div>
+    <div class="ag-msgs" id="agMsgs"></div>
+    <div class="ag-chips" id="agChips">
+      {% if side == 'pitching' %}
+      <span class="ag-chip">How does the staff look right now?</span>
+      <span class="ag-chip">Who&rsquo;s trending up?</span>
+      <span class="ag-chip">Which arms need bullpen data?</span>
+      <span class="ag-chip">Who should we build a plan for this week?</span>
+      {% else %}
+      <span class="ag-chip">How does the hitting group look?</span>
+      <span class="ag-chip">Who&rsquo;s chasing the most?</span>
+      <span class="ag-chip">What should we collect first?</span>
+      <span class="ag-chip">Who swung it best in 2026?</span>
+      {% endif %}
+    </div>
+    <div class="ag-input">
+      <input type="text" id="agText" maxlength="500"
+             placeholder="Ask about the {{ 'staff' if side == 'pitching' else 'hitters' }}&hellip;"/>
+      <button id="agSend">Ask</button>
+    </div>
+  </section>
+
   <div class="filters">
     <input type="search" id="filter" placeholder="Filter by name&hellip;"/>
-    <div class="seg">
-      <button data-side="" class="on">All</button>
-      <button data-side="pitching">Pitchers</button>
-      <button data-side="hitting">Position</button>
-    </div>
-    <span class="muted" id="count">{{ roster|length }} players</span>
+    <span class="muted" id="count">{{ shown|length }} {{ 'pitchers' if side == 'pitching' else 'hitters' }}</span>
   </div>
 
   {% if roster %}
-  {% set with_data = roster|selectattr('sessions')|list %}
-  {% set no_data = roster|rejectattr('sessions')|list %}
+  {% set with_data = shown|selectattr('sessions')|list %}
+  {% set no_data = shown|rejectattr('sessions')|list %}
   <div class="roster" id="roster">
     {% for p in with_data %}
     <a class="pcard" href="/players/{{ p.slug }}"
@@ -232,23 +317,89 @@
   const cards = [...document.querySelectorAll('.pcard, .pchip')];
   const filter = document.getElementById('filter');
   const count = document.getElementById('count');
-  let side = '';
+  // The side toggle is gone -- the tabs do that now, so this only filters names.
+  const noun = count ? count.textContent.replace(/^[0-9]+\s*/, '') : 'players';
 
   function apply(){
     const q = filter.value.trim().toLowerCase();
     let n = 0;
     for(const c of cards){
-      const ok = (!q || c.dataset.name.includes(q)) && (!side || c.dataset.side === side);
+      const ok = !q || c.dataset.name.includes(q);
       c.style.display = ok ? '' : 'none';
       if(ok) n++;
     }
-    count.textContent = n + (n === 1 ? ' player' : ' players');
+    count.textContent = n + ' ' + noun;
   }
   filter.addEventListener('input', apply);
-  document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('.seg button').forEach(x => x.classList.remove('on'));
-    b.classList.add('on'); side = b.dataset.side; apply();
-  }));
+
+  // The group coordinator: a real conversation, scoped to this tab's side.
+  // Same agent and tools as the home assistant, pointed at one group.
+  const SIDE = document.querySelector('.sidetabs a.on') &&
+               document.querySelector('.sidetabs a.on').href.indexOf('hitting') > -1
+               ? 'hitting' : 'pitching';
+  const msgs = document.getElementById('agMsgs');
+  const input = document.getElementById('agText');
+  const send = document.getElementById('agSend');
+  const chips = document.getElementById('agChips');
+  const hist = [];
+  let busy = false;
+
+  // Links come back as [[Label|URL]]; escape everything, then convert only
+  // that pattern, and only for hub-relative or https URLs.
+  function linkify(text){
+    const esc = t => t.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',
+      '"':'&quot;',"'":'&#39;'}[c]));
+    return esc(text).replace(/\[\[([^\]|]{1,120})\|([^\]\s]{1,300})\]\]/g,
+      (m, label, url) => {
+        if(!/^(\/[^\/]|https:\/\/)/.test(url)) return label;
+        const ext = url.indexOf('https:') === 0;
+        return '<a href="' + url + '"' + (ext ? ' target="_blank" rel="noopener"' : '')
+             + '>' + label + '</a>';
+      });
+  }
+
+  function bubble(cls, text){
+    const el = document.createElement('div');
+    el.className = 'ag-msg ' + cls;
+    if(cls === 'ag-bot'){ el.innerHTML = linkify(text); } else { el.textContent = text; }
+    msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
+    return el;
+  }
+
+  async function ask(q){
+    if(!q || busy) return;
+    busy = true; send.disabled = true; input.value = '';
+    if(chips) chips.style.display = 'none';
+    bubble('ag-me', q); hist.push({role:'user', text:q});
+    const typing = document.createElement('div');
+    typing.className = 'ag-typing'; typing.textContent = '\u2022\u2022\u2022';
+    msgs.appendChild(typing); msgs.scrollTop = msgs.scrollHeight;
+    try{
+      const r = await fetch('/api/groups/' + SIDE + '/chat',
+        {method:'POST', headers:{'Content-Type':'application/json'},
+         body: JSON.stringify({messages: hist})});
+      const d = await r.json().catch(function(){ return {}; });
+      typing.remove();
+      const reply = (r.ok && d.reply) ? d.reply
+                  : (d.error || 'Something went wrong \u2014 try again.');
+      bubble('ag-bot', reply);
+      if(r.ok && d.reply) hist.push({role:'assistant', text:d.reply});
+    }catch(e){
+      typing.remove();
+      bubble('ag-bot', 'Could not reach the assistant.');
+    }finally{
+      busy = false; send.disabled = false; input.focus();
+    }
+  }
+
+  if(send){
+    send.addEventListener('click', () => ask(input.value.trim()));
+    input.addEventListener('keydown', e => { if(e.key === 'Enter') ask(input.value.trim()); });
+    chips.addEventListener('click', e => {
+      const chip = e.target.closest('.ag-chip');
+      if(chip) ask(chip.textContent.trim());
+    });
+  }
 })();
 </script>
 {% endblock %}

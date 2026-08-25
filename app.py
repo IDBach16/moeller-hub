@@ -412,8 +412,13 @@ def create_app():
     def players_page():
         import profiles
         import rapsodo_card
-        return render_template("players.html", nav="players",
-                               roster=profiles.roster(_engine()),
+        # Two tabs, one per side; each led by its own coordinator chat.
+        side = request.args.get("side")
+        if side not in ("pitching", "hitting"):
+            side = "pitching"
+        engine = _engine()
+        return render_template("players.html", nav="players", side=side,
+                               roster=profiles.roster(engine),
                                # Per-pitcher visuals (velo, mix, movement, slot)
                                # so the grid reads like a wall of cards, not a
                                # list of names.
@@ -642,6 +647,24 @@ def create_app():
             return jsonify(res)
         except Exception as e:
             return jsonify({"error": f"Could not write a summary: {e}"}), 500
+
+    @app.route("/api/groups/<side>/chat", methods=["POST"])
+    def api_group_chat(side):
+        """The pitching / hitting coordinator chat on the Players tabs."""
+        import agent
+        if side not in ("pitching", "hitting"):
+            return jsonify({"error": "side must be pitching or hitting"}), 400
+        d = request.get_json(silent=True) or {}
+        msgs = d.get("messages") or []
+        if not isinstance(msgs, list) or not msgs:
+            return jsonify({"error": "no question asked"}), 400
+        try:
+            return jsonify({"reply": agent.answer(
+                msgs, request.remote_addr or "?", focus=side)})
+        except agent.RateLimited as e:
+            return jsonify({"error": str(e)}), 429
+        except Exception as e:                              # noqa: BLE001
+            return jsonify({"error": f"Could not answer: {e}"}), 500
 
     @app.route("/api/summaries/weekly", methods=["POST"])
     def api_weekly_summaries():

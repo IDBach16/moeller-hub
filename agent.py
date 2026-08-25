@@ -568,6 +568,18 @@ def tool_team_stats(kind):
     return data
 
 
+def tool_group_overview(side):
+    """Coverage, changes, benchmarks and arsenals for one side of the roster.
+
+    The across-players picture a single player's tools can't give: who has
+    data, what has moved, and where the group sits against the program.
+    """
+    import summaries
+    if side not in ("pitching", "hitting"):
+        raise ValueError("side must be pitching or hitting")
+    return summaries.build_group_context(_engine(), side)
+
+
 def tool_app_links(player=None):
     """Deeplinks: hub pages, every deployed application, and player-specific
     views. The model cites these as [[Label|URL]] and the chat renders them
@@ -624,6 +636,8 @@ TOOL_IMPLS = {
     "roster_alerts": tool_roster_alerts,
     "protocol_status": tool_protocol_status,
     "player_summary": tool_player_summary,
+    # group layer -- the pitching-staff / hitting-group read
+    "group_overview": tool_group_overview,
     # navigation layer -- the assistant is also the hub's front door
     "app_links": tool_app_links,
 }
@@ -840,6 +854,22 @@ TOOLS = [
         },
     },
     {
+        "name": "group_overview",
+        "description": "The across-players picture for ONE side of the roster "
+                       "('pitching' or 'hitting'): how many players have training "
+                       "data and how many don't, the detected changes for that "
+                       "group, program benchmarks by class, season medians, "
+                       "year-over-year fastball movers, and each tracked arm's "
+                       "velocity, slot and pitch mix. Start here for any question "
+                       "about the staff or the hitting group as a whole.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"side": {"type": "string",
+                                    "enum": ["pitching", "hitting"]}},
+            "required": ["side"],
+        },
+    },
+    {
         "name": "app_links",
         "description": "Deeplinks for navigation: the hub's pages, every deployed "
                        "Moeller application (Rapsodo dashboard, Pitcher/Hitter Cards, "
@@ -942,8 +972,26 @@ def _anthropic():
     return _client
 
 
-def answer(history, ip):
-    """history: list of {'role': 'user'|'assistant', 'text': str}. Returns reply text."""
+FOCUS = """You are answering inside the {word} page, so this conversation is about \
+the {group} specifically. Call group_overview("{side}") first when the coach asks \
+anything about the group as a whole -- coverage, who is trending, what the group \
+looks like, where attention is worth spending. Player-specific tools still apply \
+for questions about one {noun}. Stay on this group unless the coach asks about \
+someone else. Keep it short enough to read between reps: a couple of sentences or \
+a few plain lines, leading with the answer."""
+
+FOCUS_WORDS = {
+    "pitching": {"word": "Pitchers", "group": "pitching staff", "noun": "arm"},
+    "hitting": {"word": "Hitters", "group": "hitting group", "noun": "hitter"},
+}
+
+
+def answer(history, ip, focus=None):
+    """history: list of {'role': 'user'|'assistant', 'text': str}. Returns reply text.
+
+    focus: 'pitching' | 'hitting' scopes the conversation to one side of the
+    roster -- the Players tabs use it so each tab has its own coordinator.
+    """
     _check_rate(ip)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return "The assistant isn't configured yet (no API key on the server)."
@@ -957,13 +1005,21 @@ def answer(history, ip):
     if not messages or messages[-1]["role"] != "user":
         return "Ask me something about Moeller baseball data."
 
+    # The focus block goes AFTER the cached one so the shared prefix -- the big
+    # system prompt -- still caches across every conversation on every page.
+    system_blocks = [{"type": "text", "text": SYSTEM,
+                      "cache_control": {"type": "ephemeral"}}]
+    if focus in FOCUS_WORDS:
+        system_blocks.append({"type": "text",
+                              "text": FOCUS.format(side=focus, **FOCUS_WORDS[focus])})
+
     client = _anthropic()
     for _ in range(6):
         resp = client.messages.create(
             model=MODEL,
             max_tokens=8000,
             output_config={"effort": "medium"},  # snappy enough for a chat widget
-            system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
+            system=system_blocks,
             tools=TOOLS,
             messages=messages,
         )
