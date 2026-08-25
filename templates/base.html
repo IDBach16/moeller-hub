@@ -542,9 +542,11 @@ window.MoeChat = (function(){
   }
 
   // "Rudy Glotfelty (L): 86.3 avg, 89.7 max, 1837 spin" -> name + chips.
-  // "(R)", "(L)", "(JV)", "(varsity)" -- any short tag after the name, so one
-  // pitcher in a comparison doesn't fall out of the chip layout.
-  const STAT = /^([A-Z][\w'.-]*(?: [A-Z][\w'.-]*){0,3}(?: \([A-Za-z]{1,8}\))?):\s+(.+)$/;
+  // The name may carry a tag -- "(R)", "(JV)", "(LHP, varsity)" -- and the model
+  // separates it from the stats with either a colon or a dash depending on the
+  // day. Both are accepted so one pitcher in a comparison can't fall out of the
+  // chip layout; the real filter is the >=3-numeric-parts test in statline().
+  const STAT = /^([A-Z][\w'.-]*(?: [A-Z][\w'.-]*){0,3}(?: \([A-Za-z][\w ,.-]{0,24}\))?)(?::|\s+[—–-])\s+(.+)$/;
   function statline(line){
     const m = line.match(STAT);
     if(!m) return null;
