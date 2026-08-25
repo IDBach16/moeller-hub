@@ -130,6 +130,36 @@ for name, payload in payloads.items():
     # ~4 chars per token; every one of these must stay well under a few thousand.
     check(f"{name} stays compact ({n} chars)", n < 6000, f"{n} chars")
 
+# The pitch layer: what his stuff actually does. Pooled session averages move
+# whenever usage moves, so these must stay per pitch type.
+ars = agent.tool_pitch_arsenal("Jack Ujvagi")
+check("pitch_arsenal stays compact (%d chars)" % size(ars), size(ars) < 6000)
+if ars.get("has_rapsodo_data"):
+    check("  arsenal is per pitch type",
+          all("pitch" in a and "velo" in a for a in ars["arsenal"]))
+    check("  never returns an individual pitch",
+          not any(isinstance(v, list) for a in ars["arsenal"] for v in a.values()))
+    check("  unlabeled pitches are excluded",
+          all(a["pitch"] != "UNK" for a in ars["arsenal"]))
+else:
+    check("  says so plainly when there is no Rapsodo data",
+          ars.get("note") and "no" in ars["note"].lower())
+
+# A fabricated URL must never reach a coach. Prompt wording can't guarantee
+# this -- a model invented moeller-rapsodo.app in testing -- so the reply is
+# filtered before it is returned.
+check("link guard keeps a real app link",
+      agent._sanitize_links(
+          "[[T|https://rapsodo-app-production.up.railway.app/?p=x]]").startswith("[["))
+check("  keeps a real hub route",
+      agent._sanitize_links("[[p|/players/seth-maybury]]").startswith("[["))
+check("  strips an invented host",
+      agent._sanitize_links("[[S|https://moeller-rapsodo.app/player/x]]") == "S")
+check("  strips a route the hub does not serve",
+      agent._sanitize_links("[[n|/admin/secrets]]") == "n")
+check("  strips javascript:",
+      agent._sanitize_links("[[x|javascript:alert(1)]]") == "x")
+
 hist = payloads["metric_history"]
 check("metric_history returns SESSIONS, not pitches",
       len(hist["sessions"]) == 9, f"{len(hist['sessions'])} rows for 900 pitches")

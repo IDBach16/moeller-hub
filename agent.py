@@ -16,9 +16,11 @@ a polite error rather than crashing the hub.
 
 import json
 import os
+import re
 import threading
 import time
 from collections import deque
+from urllib.parse import urlparse
 
 import requests as rq
 
@@ -31,6 +33,8 @@ CHARTING_BASE = "https://moeller-charting-production.up.railway.app"
 # at a locally running copy of the stats app.
 STATS_BASE = os.environ.get(
     "STATS_BASE", "https://moeller-2026-stats-production.up.railway.app")
+RAPSODO_BASE = os.environ.get(
+    "RAPSODO_BASE", "https://rapsodo-app-production.up.railway.app")
 
 MODEL = "claude-opus-5"
 
@@ -568,6 +572,89 @@ def tool_team_stats(kind):
     return data
 
 
+def tool_pitch_arsenal(player, sessions=6):
+    """What each of his pitches DOES, and how each has moved session to session.
+
+    The pitch-scoped view the session-level tools can't give: a pooled average
+    moves whenever his usage moves, so every number here belongs to one pitch.
+    """
+    import rapsodo_card
+    row, err = _resolve(player)
+    if err:
+        return err
+    card = rapsodo_card.card(_engine(), row.id)
+    if not card.get("has_data"):
+        return {"player": f"{row.first_name} {row.last_name}",
+                "has_rapsodo_data": False,
+                "note": "No Rapsodo bullpen data on record for him yet."}
+
+    def r1(v):
+        return round(v, 1) if isinstance(v, (int, float)) else v
+
+    arsenal = [{"pitch": a["pt"], "name": a["label"], "n": a["n"],
+                "usage_pct": a["usage"], "velo": a["velo"], "max_velo": a["max"],
+                "spin": a["spin"], "ivb": a["ivb"], "hb": a["hb"],
+                "spin_eff_pct": a["eff"], "release_ht": a["rel_h"],
+                "release_side": a["rel_s"]}
+               for a in card["arsenal"] if a["pt"] != "UNK"]
+
+    # Per session, per pitch -- the trend a coach reads down the column.
+    log = []
+    for e in rapsodo_card.session_log(card["pitches"])[:sessions]:
+        log.append({"date": e["date"], "pitches": e["n"],
+                    "zone_pct": e["zone_pct"],
+                    "by_pitch": {x["pt"]: {"n": x["n"], "velo": r1(x["velo"]),
+                                           "ivb": r1(x["ivb"]), "hb": r1(x["hb"]),
+                                           "eff": x["eff"]}
+                                 for x in e["rows"]}})
+
+    return {"player": f"{row.first_name} {row.last_name}",
+            "has_rapsodo_data": True,
+            "tracked_pitches": card["n_pitches"],
+            "bullpens": card["n_sessions"], "span": card["span"],
+            "arsenal": arsenal,
+            "recent_sessions": log,
+            "note": ("Bullpen data. Velocity/break/spin are per pitch type -- "
+                     "never compare one pitch's number to another's.")}
+
+
+def tool_stuff_plus(player=None):
+    """Stuff+ grades: pitch quality on the program scale.
+
+    Served by the Rapsodo app so the model, its 30-rep floor and the scale live
+    in one place. 100 = the average Moeller tracked pitch, 10 points = one
+    staff SD. It grades SHAPE, not command.
+    """
+    try:
+        r = rq.get(RAPSODO_BASE + "/api/stuff", timeout=25)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:                                  # noqa: BLE001
+        return {"error": f"Stuff+ service unavailable: {e}"}
+    rows = data.get("rows") or []
+    if player:
+        row, err = _resolve(player)
+        if err:
+            return err
+        mine = [x for x in rows if x.get("player_id") == row.id]
+        if not mine:
+            return {"player": f"{row.first_name} {row.last_name}",
+                    "graded_pitches": [],
+                    "note": ("No pitch of his has the 30 tracked reps a grade "
+                             "needs yet."),
+                    "scale": data.get("scale")}
+        return {"player": f"{row.first_name} {row.last_name}",
+                "graded_pitches": [{"pitch": x["label"], "stuff_plus": x["stuff"],
+                                    "reps": x["n"], "staff_rank": x["rank"]}
+                                   for x in mine],
+                "staff_graded_total": len(rows), "scale": data.get("scale")}
+    return {"staff_board": [{"rank": x["rank"], "player": x["name"],
+                             "pitch": x["label"], "stuff_plus": x["stuff"],
+                             "reps": x["n"]} for x in rows[:25]],
+            "graded_total": len(rows), "scale": data.get("scale"),
+            "min_reps": data.get("min_reps")}
+
+
 def tool_group_overview(side):
     """Coverage, changes, benchmarks and arsenals for one side of the roster.
 
@@ -636,6 +723,9 @@ TOOL_IMPLS = {
     "roster_alerts": tool_roster_alerts,
     "protocol_status": tool_protocol_status,
     "player_summary": tool_player_summary,
+    # pitch layer -- what his stuff actually does
+    "pitch_arsenal": tool_pitch_arsenal,
+    "stuff_plus": tool_stuff_plus,
     # group layer -- the pitching-staff / hitting-group read
     "group_overview": tool_group_overview,
     # navigation layer -- the assistant is also the hub's front door
@@ -854,6 +944,39 @@ TOOLS = [
         },
     },
     {
+        "name": "pitch_arsenal",
+        "description": "What each of a pitcher's pitches DOES, from his Rapsodo "
+                       "bullpens: per pitch type the velocity, max, spin, induced "
+                       "vertical break, horizontal break, spin efficiency, release "
+                       "point and usage -- plus the last few sessions broken out the "
+                       "same way, so you can see how one pitch has moved over time. "
+                       "Use this for any question about a pitcher's stuff, a specific "
+                       "pitch, or how a pitch is trending.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string"},
+                "sessions": {"type": "integer",
+                             "description": "how many recent bullpens to break "
+                                            "out (default 6)"},
+            },
+            "required": ["player"],
+        },
+    },
+    {
+        "name": "stuff_plus",
+        "description": "Stuff+ pitch grades on the program scale: 100 is the average "
+                       "Moeller tracked pitch and 10 points is one staff standard "
+                       "deviation. Pass a player for his grades and staff ranks; pass "
+                       "nothing for the staff board. A pitch needs 30 tracked reps to "
+                       "be graded at all. Stuff+ grades a pitch's SHAPE and says "
+                       "nothing about command -- never present it as command.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"player": {"type": "string"}},
+        },
+    },
+    {
         "name": "group_overview",
         "description": "The across-players picture for ONE side of the roster "
                        "('pitching' or 'hitting'): how many players have training "
@@ -901,6 +1024,11 @@ TWO LAYERS OF DATA
 Player development — training sessions, detected changes, goals and interventions:
 - find_player, player_snapshot, what_changed, metric_history, compare_windows,
   goals_and_interventions, roster_alerts, protocol_status, player_summary.
+- pitch_arsenal and stuff_plus are the PITCH-LEVEL layer. Any question about what a
+  pitcher throws, what one of his pitches does, or how a pitch is trending goes to
+  pitch_arsenal -- the session tools only carry pooled averages, which move whenever
+  his usage moves. stuff_plus grades a pitch's shape against the program; it says
+  nothing about command, so never present it as command.
 - These read a connected history of Blast / HitTrax / Rapsodo sessions per player.
 - This data is NEW and may be thin or empty. That is expected, not an error.
 
@@ -986,6 +1114,48 @@ FOCUS_WORDS = {
 }
 
 
+# Hub routes a link may point at. Anything else relative is not a page.
+# "/" is matched exactly, never as a prefix -- as a prefix it would let every
+# relative path through, which is the whole thing this guard exists to stop.
+HUB_ROUTES = ("/players", "/team", "/season", "/prep", "/video", "/tools",
+              "/collect")
+
+_LINK = re.compile(r"\[\[([^\]|]{1,120})\|([^\]\s]{1,300})\]\]")
+
+
+def _allowed_hosts():
+    """Every host the system actually owns, from the tool registry itself."""
+    import tools as registry
+    hosts = set()
+    for base in (CHARTING_BASE, STATS_BASE, RAPSODO_BASE):
+        hosts.add(urlparse(base).netloc)
+    for t in registry.TOOLS:
+        hosts.add(urlparse(t["url"]).netloc)
+    hosts.discard("")
+    return hosts
+
+
+def _sanitize_links(text):
+    """Drop the link syntax around any URL we don't recognise.
+
+    The coach still reads the sentence; he just doesn't get handed a link to
+    a domain that doesn't exist.
+    """
+    hosts = _allowed_hosts()
+
+    def keep(m):
+        label, url = m.group(1), m.group(2)
+        if url.startswith("/"):
+            ok = url == "/" or any(url == r or url.startswith(r + "/")
+                                   for r in HUB_ROUTES)
+            return m.group(0) if ok else label
+        if url.startswith("https://") and urlparse(url).netloc in hosts:
+            return m.group(0)
+        return label            # invented or off-system -- text only
+
+    return _LINK.sub(keep, text)
+
+
 def answer(history, ip, focus=None):
     """history: list of {'role': 'user'|'assistant', 'text': str}. Returns reply text.
 
@@ -1045,6 +1215,6 @@ def answer(history, ip, focus=None):
             continue
 
         text = "".join(b.text for b in resp.content if b.type == "text").strip()
-        return text or "I came up empty on that one — try rephrasing?"
+        return _sanitize_links(text) or "I came up empty on that one — try rephrasing?"
 
     return "That took more digging than I can do in one go — try a narrower question."
