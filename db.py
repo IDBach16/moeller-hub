@@ -317,6 +317,23 @@ change_events = Table(
 
 Index("ix_change_player", change_events.c.player_id, change_events.c.detected_on)
 
+# A player's own link to his own data. The token IS the credential -- a coach
+# texts it to one kid, and anyone holding it can read that player's card and
+# nothing else: no roster, no team pages, no other player, no writes. Kept in a
+# table rather than signed into the URL so a link can actually be revoked, and
+# so a coach can see whether it was ever opened.
+player_links = Table(
+    "player_links", metadata,
+    Column("token", String(48), primary_key=True),
+    Column("player_id", Integer, ForeignKey("players.id"), nullable=False),
+    Column("created_at", DateTime, server_default=func.now()),
+    Column("revoked_at", DateTime),
+    Column("last_seen_at", DateTime),
+    Column("views", Integer, server_default="0"),
+)
+
+Index("ix_player_link_player", player_links.c.player_id)
+
 # Cached AI summaries. Stored against the player's latest session id, so
 # unchanged data returns cached text with no API call at all. (spec section 9.2)
 ai_summaries = Table(

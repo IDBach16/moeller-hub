@@ -150,6 +150,11 @@ def create_app():
             return None
         if request.path in PUBLIC_PATHS:
             return None
+        # A player's link carries its own credential in the token, and the kid
+        # does not have the staff password. Gating it would make the whole
+        # feature unusable the moment the gate goes back on.
+        if request.path.startswith("/me/"):
+            return None
         if not session.get("authed"):
             return redirect(url_for("login"))
         return None
@@ -470,6 +475,34 @@ def create_app():
             metric_options=development.goal_metric_options(),
             directions=db.GOAL_DIRECTIONS,
             categories=db.INTERVENTION_CATEGORIES)
+
+    # -----------------------------------------------------------------------
+    # A player's own link. Read-only, one player, no way out to the rest of
+    # the hub -- see playerlink.py for why the token lives in a table.
+    # -----------------------------------------------------------------------
+
+    @app.route("/me/<token>")
+    def my_card(token):
+        import playerlink
+        c = playerlink.card(_engine(), token)
+        if not c:
+            # Deliberately the same answer for revoked, mistyped and never-
+            # issued: a probe learns nothing about which tokens exist.
+            return render_template("mycard_gone.html"), 404
+        return render_template("mycard.html", c=c)
+
+    @app.route("/api/players/<int:player_id>/link", methods=["POST", "DELETE"])
+    def player_link_api(player_id):
+        if not writes_enabled():
+            return jsonify({"error": "Sharing links are disabled while the hub "
+                                     "is public without a password."}), 403
+        import playerlink
+        if request.method == "DELETE":
+            n = playerlink.revoke(_engine(), player_id)
+            return jsonify({"revoked": n})
+        token = playerlink.issue(_engine(), player_id)
+        return jsonify({"token": token, "url": url_for(
+            "my_card", token=token, _external=True)})
 
     @app.route("/season")
     def season_page():

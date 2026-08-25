@@ -1,0 +1,187 @@
+{# The one page in this hub written for a player rather than a coach.
+
+   It does NOT extend base.html on purpose: base carries the sidebar, and every
+   item in it goes somewhere this kid must not go. A page with no nav cannot
+   leak a roster.
+
+   Phone-first -- this is opened on a phone in a dugout or a bedroom, basically
+   never on a desktop. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="robots" content="noindex,nofollow"/>
+<title>{{ c.name }} — Moeller Baseball</title>
+<link rel="icon" href="/moeller-logo.png"/>
+<link rel="apple-touch-icon" href="/moeller-logo.png"/>
+<meta name="theme-color" content="#0f0f1e"/>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--navy-deep:#0f0f1e;--gold:#C5A55A;--gold-light:#d4ba78;
+  --card:rgba(26,26,46,.6);--line:rgba(197,165,90,.18);--up:#5fd39a;--down:#e0765f}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  background:var(--navy-deep);color:#fff;-webkit-font-smoothing:antialiased;
+  padding:0 0 3rem;line-height:1.55}
+.wrap{max-width:640px;margin:0 auto;padding:1.1rem 1.05rem 0}
+header{display:flex;align-items:center;gap:.75rem;padding:.2rem 0 1.1rem}
+header img{width:38px;height:38px;object-fit:contain}
+header .who{font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;
+  color:rgba(255,255,255,.45);font-weight:700}
+h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
+.sub{color:rgba(255,255,255,.5);font-size:.85rem;margin-top:.15rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:1.05rem 1rem;margin-top:1rem}
+.card h2{font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--gold);font-weight:700;margin-bottom:.2rem}
+.card .note{color:rgba(255,255,255,.45);font-size:.78rem;margin-bottom:.85rem}
+.num{font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+
+/* The percentile strip. One row per metric: his number, then where it sits
+   against the pitchers he is actually compared with. */
+.bar{margin:.8rem 0 0}
+.bar:first-of-type{margin-top:0}
+.bar .top{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem}
+.bar .lab{font-size:.82rem;color:rgba(255,255,255,.8)}
+.bar .val{font-size:.95rem;font-weight:700;white-space:nowrap}
+.bar .val small{font-size:.68rem;color:rgba(255,255,255,.45);font-weight:600;
+  margin-left:.15rem}
+/* The rank rides in the label row, not floating over the track: a low
+   percentile puts the dot at the left, exactly where the label already is. */
+.pctnum{font-size:.66rem;font-weight:800;color:var(--gold-light);
+  background:rgba(197,165,90,.14);border-radius:99px;padding:.1rem .42rem;
+  margin-left:.35rem;white-space:nowrap}
+.track{position:relative;height:8px;border-radius:99px;margin-top:.45rem;
+  background:rgba(255,255,255,.08)}
+.fill{position:absolute;inset:0 auto 0 0;border-radius:99px;
+  background:linear-gradient(90deg,rgba(197,165,90,.45),var(--gold))}
+.dot{position:absolute;top:50%;width:15px;height:15px;border-radius:50%;
+  transform:translate(-50%,-50%);background:var(--gold);
+  border:2px solid var(--navy-deep)}
+.pool{margin-top:1rem;font-size:.72rem;color:rgba(255,255,255,.38);line-height:1.5}
+
+.chg{padding:.6rem 0;border-bottom:1px solid rgba(255,255,255,.07)}
+.chg:last-child{border-bottom:none}
+.chg .h{font-weight:700;font-size:.9rem}
+.chg .h.up{color:var(--up)} .chg .h.down{color:var(--down)}
+.chg .d{color:rgba(255,255,255,.6);font-size:.82rem}
+.goal{padding:.55rem 0;border-bottom:1px solid rgba(255,255,255,.07)}
+.goal:last-child{border-bottom:none}
+.gtrack{height:6px;border-radius:99px;background:rgba(255,255,255,.08);margin-top:.4rem}
+.gfill{height:100%;border-radius:99px;background:var(--gold)}
+.empty{color:rgba(255,255,255,.45);font-size:.85rem}
+.foot{max-width:640px;margin:1.6rem auto 0;padding:0 1.05rem;
+  color:rgba(255,255,255,.3);font-size:.72rem;line-height:1.65}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="/moeller-logo.png" alt=""/>
+    <span class="who">Moeller Baseball · Player Development</span>
+  </header>
+
+  <h1>{{ c.name }}</h1>
+  <div class="sub">
+    {# class_year is the class name ("Sophomore"), not a graduating year. #}
+    {{ c.pos or 'Player' }}{% if c.class_year %} · {{ c.class_year }}{% endif %}
+    {%- if c.sessions_n %} · {{ c.sessions_n }} tracked session{{ '' if c.sessions_n == 1 else 's' }}{% endif %}
+  </div>
+
+  {# ---- Where he ranks. The headline for a player; a coach reads it last. ---- #}
+  {% if c.strip and c.strip.enough %}
+  <section class="card">
+    <h2>Where you rank — your {{ c.strip.pitch }}</h2>
+    {# Levels are stored lowercase ('jv'), and "at jv level" reads like a typo. #}
+    <p class="note">Out of {{ c.strip.pool_n }} Moeller arms with enough
+      {{ c.strip.pitch }} data{% if c.strip.pool != 'the staff' %} at
+      {{ 'JV' if c.strip.pool == 'jv' else c.strip.pool|title }} level{% endif %}.
+      Higher is further right.</p>
+    {% for b in c.strip.bars %}
+    <div class="bar">
+      <div class="top">
+        <span class="lab">{{ b.label }}<span class="pctnum">{{ b.pct }}th</span></span>
+        <span class="val num">{{ b.value }}<small>{{ b.unit }}</small></span>
+      </div>
+      <div class="track">
+        <div class="fill" style="width:{{ b.pct }}%"></div>
+        <div class="dot" style="left:{{ b.pct }}%"></div>
+      </div>
+    </div>
+    {% endfor %}
+    <p class="pool">These percentiles are against Moeller pitchers only — not
+      against high school baseball, college, or pro. They say where you sit in
+      this program right now, nothing more. Shape only: none of these measure
+      command.</p>
+  </section>
+  {% elif c.is_pitcher %}
+  <section class="card">
+    <h2>Where you rank</h2>
+    <p class="empty">
+      {% if c.strip %}
+        Not enough tracked data yet — you have {{ c.strip.n }}
+        {{ c.strip.pitch }}s and it takes {{ c.strip.min_n }} of one pitch
+        before a ranking means anything.
+      {% else %}
+        No Rapsodo data on you yet. Once you throw a tracked pen this fills in.
+      {% endif %}
+    </p>
+  </section>
+  {% endif %}
+
+  {# ---- What changed, against HIS baseline only. ---- #}
+  <section class="card">
+    <h2>What's changed</h2>
+    <p class="note">Compared against your own past numbers — never against a teammate.</p>
+    {% if not c.baseline_ready %}
+      <p class="empty">You're at {{ c.sessions_n }} tracked session{{ '' if c.sessions_n == 1 else 's' }}.
+        It takes 3 to set your baseline — until then there's nothing honest to compare against.</p>
+    {% elif c.changes %}
+      {% for ch in c.changes %}
+      <div class="chg">
+        <div class="h {{ 'up' if ch.favorable else 'down' }}">
+          {{ ch.summary or ch.metric_key }}
+        </div>
+        {% if ch.detected_on %}<div class="d">Spotted {{ ch.detected_on }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="empty">Nothing has moved far enough from your baseline to flag.
+        That isn't a knock — it means your numbers are holding steady.</p>
+    {% endif %}
+  </section>
+
+  {# ---- What he's working on. ---- #}
+  {% if c.goals %}
+  <section class="card">
+    <h2>What you're working on</h2>
+    {% for g in c.goals %}
+    <div class="goal">
+      <div class="top" style="display:flex;justify-content:space-between;gap:.6rem">
+        <span>{{ g.label or g.metric_key }}</span>
+        {% if g.current is not none %}<span class="num">{{ g.current }}</span>{% endif %}
+      </div>
+      {% if g.progress is not none %}
+      <div class="gtrack"><div class="gfill" style="width:{{ [[g.progress, 0]|max, 100]|min }}%"></div></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if c.last_session %}
+  <section class="card">
+    <h2>Last session</h2>
+    <p class="empty" style="color:rgba(255,255,255,.7)">
+      {{ c.last_session.date }}{% if c.last_session.session_type %} ·
+      {{ c.last_session.session_type|replace('_', ' ') }}{% endif %}
+    </p>
+  </section>
+  {% endif %}
+</div>
+
+<p class="foot">This page is yours — it shows your data only. Questions about
+  any of it go to a coach, not to the numbers. If you got this link and it isn't
+  you, please tell a coach so we can turn it off.</p>
+</body>
+</html>

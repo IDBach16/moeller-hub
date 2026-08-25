@@ -7,6 +7,14 @@
 .phead h1{font-size:2.1rem;font-weight:800;letter-spacing:.01em}
 .phead .meta{color:rgba(255,255,255,.5);font-size:.88rem;margin-top:.35rem}
 .phead .spacer{flex:1}
+.phead-act{display:flex;gap:.5rem;flex-wrap:wrap}
+.plink{background:rgba(15,15,30,.55);border:1px solid var(--glass-border);
+  border-radius:11px;padding:.85rem .9rem;margin:.2rem 0 .4rem}
+.plink-row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.plink input{flex:1;min-width:min(240px,100%);background:rgba(0,0,0,.35);
+  border:1px solid var(--glass-border);border-radius:8px;color:var(--gold-light);
+  padding:.5rem .65rem;font-family:ui-monospace,Consolas,monospace;font-size:.8rem}
+.plink .hint{margin-top:.55rem}
 
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:.9rem}
 .tile{
@@ -227,7 +235,9 @@ td.strong{color:var(--white);font-weight:700}
       <h1>{{ p.player.name }}</h1>
       <div class="meta">
         {{ 'Pitcher' if p.player.is_pitcher else 'Position player' }}
-        {%- if p.player.class_year %} &middot; Class of {{ p.player.class_year }}{% endif %}
+        {# class_year holds the class NAME ("Senior"), not a graduating year --
+           "Class of Senior" was the giveaway. #}
+        {%- if p.player.class_year %} &middot; {{ p.player.class_year }}{% endif %}
         {%- if p.player.bats %} &middot; Bats {{ p.player.bats }}{% endif %}
         {%- if p.player.throws %} &middot; Throws {{ p.player.throws }}{% endif %}
         {%- if p.last_session %} &middot; Last session {{ p.last_session }}
@@ -260,7 +270,23 @@ td.strong{color:var(--white);font-weight:700}
       {% endif %}
     </div>
     <div class="spacer"></div>
-    <a href="/players" class="btn ghost">&larr; Roster</a>
+    <div class="phead-act">
+      <a href="/players" class="btn ghost">&larr; Roster</a>
+      {% if writes_enabled %}
+      <button class="btn ghost" id="linkBtn" type="button">Player link</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {# The kid's own link. Read-only, his data only, and revocable -- the token
+     is the credential, so treat it like handing him a key. #}
+  <div class="plink" id="linkBox" hidden>
+    <div class="plink-row">
+      <input type="text" id="linkUrl" readonly/>
+      <button class="btn" id="linkCopy" type="button">Copy</button>
+      <button class="btn ghost" id="linkOff" type="button">Turn off</button>
+    </div>
+    <p class="hint" id="linkNote"></p>
   </div>
   <p class="page-sub"></p>
 
@@ -922,6 +948,50 @@ function toggle(btnId, formId, cancelId){
 }
 toggle('showGoal', 'goalForm', 'cancelGoal');
 toggle('showIv', 'ivForm', 'cancelIv');
+
+/* The player link. Issuing is idempotent server-side -- clicking twice hands
+   back the same URL rather than invalidating the one already on his phone. */
+(function(){
+  const btn = document.getElementById('linkBtn');
+  if(!btn) return;
+  const box = document.getElementById('linkBox'),
+        url = document.getElementById('linkUrl'),
+        note = document.getElementById('linkNote'),
+        API = '/api/players/{{ p.player.id }}/link';
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try{
+      const r = await fetch(API, {method:'POST'});
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.error || 'Could not create the link.');
+      url.value = d.url; box.hidden = false;
+      note.textContent = 'Text this to ' + {{ p.player.name|tojson }}
+        + '. It shows his data only — no roster, no teammates, and nothing he '
+        + 'can change. Anyone holding the link can open it, so turn it off if '
+        + 'it goes astray.';
+      url.focus(); url.select();
+    }catch(e){
+      box.hidden = false; note.textContent = e.message;
+    }finally{ btn.disabled = false; }
+  });
+
+  document.getElementById('linkCopy').addEventListener('click', () => {
+    url.select();
+    navigator.clipboard.writeText(url.value)
+      .then(() => { note.textContent = 'Copied.'; })
+      .catch(() => { note.textContent = 'Press Ctrl+C to copy.'; });
+  });
+
+  document.getElementById('linkOff').addEventListener('click', async () => {
+    const r = await fetch(API, {method:'DELETE'});
+    const d = await r.json();
+    url.value = '';
+    note.textContent = r.ok
+      ? 'Turned off. Any link already sent to him has stopped working.'
+      : (d.error || 'Could not turn it off.');
+  });
+})();
 
 const val = id => (document.getElementById(id).value || '').trim();
 
