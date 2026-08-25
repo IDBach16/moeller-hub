@@ -3,7 +3,7 @@
 
 {% block head %}
 <style>
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.9rem;
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr));gap:.9rem;
   margin-bottom:1.5rem}
 .stat{background:rgba(15,15,30,.5);border:1px solid var(--glass-border);
   border-radius:11px;padding:1rem}
@@ -28,7 +28,7 @@
 .namelist a:hover{border-color:var(--gold);color:var(--gold)}
 
 /* ===== program development ===== */
-.progline{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.9rem}
+.progline{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:.9rem}
 .pyear{background:rgba(15,15,30,.5);border:1px solid var(--glass-border);
   border-radius:11px;padding:1rem 1.1rem}
 .pyear .y{font-size:.72rem;letter-spacing:.14em;color:var(--gold);

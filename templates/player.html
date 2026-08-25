@@ -8,7 +8,7 @@
 .phead .meta{color:rgba(255,255,255,.5);font-size:.88rem;margin-top:.35rem}
 .phead .spacer{flex:1}
 
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.9rem}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:.9rem}
 .tile{
   background:rgba(15,15,30,.5);border:1px solid var(--glass-border);
   border-radius:11px;padding:.9rem 1rem;
@@ -81,7 +81,7 @@
 .prepost-foot{font-size:.72rem;margin-top:.5rem;font-style:italic}
 
 .addform{margin-top:1rem;padding-top:1rem;border-top:1px solid var(--glass-border)}
-.addform .grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.addform .grid{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
 .good{color:#8fd9a4}
 .bad{color:#e79a9a}
 
@@ -171,7 +171,7 @@ td.strong{color:var(--white);font-weight:700}
 .rap-sw[data-pt=SI]{background:var(--pt-SI)} .rap-sw[data-pt=CT]{background:var(--pt-CT)}
 .rap-sw[data-pt=SP]{background:var(--pt-SP)}
 
-.rap-plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+.rap-plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));
   gap:1rem;margin:0 0 1.2rem}
 .rap-plots figure{margin:0;background:rgba(255,255,255,.03);
   border:1px solid var(--glass-border);border-radius:8px;padding:.7rem}
