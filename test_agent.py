@@ -145,6 +145,29 @@ else:
     check("  says so plainly when there is no Rapsodo data",
           ars.get("note") and "no" in ars["note"].lower())
 
+# The write layer: the agent DRAFTS, the coach confirms. A proposal tool must
+# validate exactly like the write path, and must not touch the database.
+before = agent.tool_goals_and_interventions("Jack Ujvagi")
+draft = agent.tool_propose_goal("Jack Ujvagi", "Hold 88 into June",
+                                "fb_velocity", "increase", 88.0)
+check("propose_goal returns a draft", draft.get("kind") == "goal", str(draft))
+check("  resolved to the right player", draft.get("player_id") == JACK)
+after = agent.tool_goals_and_interventions("Jack Ujvagi")
+check("  and wrote NOTHING", len(after["goals"]) == len(before["goals"]),
+      f"{len(before['goals'])} -> {len(after['goals'])}")
+check("  an unknown metric is refused",
+      "error" in agent.tool_propose_goal("Jack Ujvagi", "x", "nope", "increase", 1))
+check("  a measurable goal without a direction is refused",
+      "error" in agent.tool_propose_goal("Jack Ujvagi", "x", "fb_velocity", None, 88))
+check("  a bad intervention category is refused",
+      "error" in agent.tool_propose_intervention("Jack Ujvagi", "x", category="nope"))
+check("propose_intervention returns a draft",
+      agent.tool_propose_intervention("Jack Ujvagi", "New grip",
+                                      category="grip").get("kind") == "intervention")
+check("development_options lists metrics and categories",
+      agent.tool_development_options()["intervention_categories"]
+      == list(db.INTERVENTION_CATEGORIES))
+
 # A fabricated URL must never reach a coach. Prompt wording can't guarantee
 # this -- a model invented moeller-rapsodo.app in testing -- so the reply is
 # filtered before it is returned.

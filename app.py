@@ -659,12 +659,55 @@ def create_app():
         if not isinstance(msgs, list) or not msgs:
             return jsonify({"error": "no question asked"}), 400
         try:
-            return jsonify({"reply": agent.answer(
-                msgs, request.remote_addr or "?", focus=side)})
+            reply, drafts = agent.answer_with_proposals(
+                msgs, request.remote_addr or "?", focus=side)
+            return jsonify({"reply": reply, "proposals": drafts,
+                            "can_write": writes_enabled()})
         except agent.RateLimited as e:
             return jsonify({"error": str(e)}), 429
         except Exception as e:                              # noqa: BLE001
             return jsonify({"error": f"Could not answer: {e}"}), 500
+
+    @app.route("/api/development/apply", methods=["POST"])
+    def api_development_apply():
+        """Commit a draft the coach confirmed in the chat.
+
+        The agent never reaches this path -- it only drafts. Everything is
+        re-validated here against development.py, so a tampered payload is
+        rejected exactly as a bad form submission would be.
+        """
+        import development
+        if not writes_enabled():
+            return jsonify({"error": WRITES_OFF}), 403
+        d = request.get_json(silent=True) or {}
+        kind = d.get("kind")
+        engine = _engine()
+        try:
+            pid = int(d.get("player_id"))
+            if kind == "goal":
+                new_id = development.create_goal(
+                    engine, pid, title=d.get("title"),
+                    metric_key=d.get("metric_key") or None,
+                    direction=d.get("direction") or None,
+                    target_value=d.get("target_value"),
+                    detail=d.get("detail") or None,
+                    review_on=d.get("review_on") or None,
+                    set_by=d.get("set_by") or "Coach (via assistant)")
+                return jsonify({"ok": True, "kind": kind, "id": new_id})
+            if kind == "intervention":
+                new_id = development.create_intervention(
+                    engine, pid, title=d.get("title"),
+                    category=d.get("category") or None,
+                    detail=d.get("detail") or None,
+                    intervention_date=d.get("intervention_date") or None,
+                    review_on=d.get("review_on") or None,
+                    coach=d.get("coach") or "Coach (via assistant)")
+                return jsonify({"ok": True, "kind": kind, "id": new_id})
+            return jsonify({"error": "kind must be goal or intervention"}), 400
+        except development.DevError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:                              # noqa: BLE001
+            return jsonify({"error": f"Could not save: {e}"}), 500
 
     @app.route("/api/summaries/weekly", methods=["POST"])
     def api_weekly_summaries():

@@ -572,6 +572,98 @@ def tool_team_stats(kind):
     return data
 
 
+# Proposals raised during one answer() call. Thread-local because Flask serves
+# requests on threads and two coaches must never see each other's drafts.
+_pending = threading.local()
+
+
+def _propose(kind, payload):
+    buf = getattr(_pending, "items", None)
+    if buf is None:
+        buf = _pending.items = []
+    payload = {"kind": kind, **payload}
+    buf.append(payload)
+    return payload
+
+
+def tool_propose_goal(player, title, metric_key=None, direction=None,
+                      target_value=None, detail=None, review_on=None):
+    """Draft a development goal for the coach to confirm. Writes nothing.
+
+    Validated here against the same rules the write path enforces, so a
+    proposal a coach accepts cannot then be rejected.
+    """
+    import db
+    import development
+    import metrics as reg
+    row, err = _resolve(player)
+    if err:
+        return err
+    if not (title or "").strip():
+        return {"error": "a goal needs a title"}
+    if metric_key:
+        if not reg.known(metric_key):
+            return {"error": f"'{metric_key}' is not a known metric",
+                    "known_metrics": [m["key"] for m in
+                                      development.goal_metric_options()]}
+        if direction not in db.GOAL_DIRECTIONS:
+            return {"error": "a measurable goal needs a direction",
+                    "directions": list(db.GOAL_DIRECTIONS)}
+        if target_value is None:
+            return {"error": "a measurable goal needs a target value"}
+        try:
+            target_value = float(target_value)
+        except (TypeError, ValueError):
+            return {"error": "target_value must be a number"}
+
+    return _propose("goal", {
+        "player_id": row.id, "player": f"{row.first_name} {row.last_name}",
+        "title": title.strip(), "metric_key": metric_key, "direction": direction,
+        "target_value": target_value, "detail": detail, "review_on": review_on,
+        "note": "Drafted, not saved. The coach confirms it in the chat.",
+    })
+
+
+def tool_propose_intervention(player, title, category=None, detail=None,
+                              intervention_date=None, review_on=None):
+    """Draft an intervention for the coach to confirm. Writes nothing.
+
+    An intervention is what makes a later change measurable against something,
+    so logging one is usually the most useful thing to come out of a
+    conversation about a player.
+    """
+    import db
+    row, err = _resolve(player)
+    if err:
+        return err
+    if not (title or "").strip():
+        return {"error": "an intervention needs a title"}
+    if category and category not in db.INTERVENTION_CATEGORIES:
+        return {"error": f"'{category}' is not a known category",
+                "categories": list(db.INTERVENTION_CATEGORIES)}
+
+    return _propose("intervention", {
+        "player_id": row.id, "player": f"{row.first_name} {row.last_name}",
+        "title": title.strip(), "category": category, "detail": detail,
+        "intervention_date": intervention_date, "review_on": review_on,
+        "note": "Drafted, not saved. The coach confirms it in the chat.",
+    })
+
+
+def tool_development_options():
+    """What a goal or intervention can legally say: metrics, directions,
+    categories. Call before proposing so the draft is valid first time."""
+    import db
+    import development
+    return {
+        "goal_metrics": [{"key": m["key"], "label": m["label"],
+                          "suggested_direction": m["suggested_direction"]}
+                         for m in development.goal_metric_options()],
+        "goal_directions": list(db.GOAL_DIRECTIONS),
+        "intervention_categories": list(db.INTERVENTION_CATEGORIES),
+    }
+
+
 def tool_pitch_arsenal(player, sessions=6):
     """What each of his pitches DOES, and how each has moved session to session.
 
@@ -723,6 +815,10 @@ TOOL_IMPLS = {
     "roster_alerts": tool_roster_alerts,
     "protocol_status": tool_protocol_status,
     "player_summary": tool_player_summary,
+    # write layer -- the agent drafts, the coach confirms
+    "development_options": tool_development_options,
+    "propose_goal": tool_propose_goal,
+    "propose_intervention": tool_propose_intervention,
     # pitch layer -- what his stuff actually does
     "pitch_arsenal": tool_pitch_arsenal,
     "stuff_plus": tool_stuff_plus,
@@ -944,6 +1040,62 @@ TOOLS = [
         },
     },
     {
+        "name": "development_options",
+        "description": "The metrics a goal can be set on (with the direction each "
+                       "suggests), the valid goal directions, and the intervention "
+                       "categories. Call this before proposing anything so the draft "
+                       "is valid the first time.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "propose_goal",
+        "description": "Draft a development goal for the coach to confirm. This does "
+                       "NOT save anything -- it returns a draft the coach accepts or "
+                       "rejects in the chat. Propose one when the conversation lands "
+                       "on something worth tracking, and prefer a measurable goal "
+                       "(metric_key + direction + target_value) over a narrative one, "
+                       "because only a measurable goal can report progress. Say in "
+                       "your reply what you drafted and that it is waiting on him.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string"},
+                "title": {"type": "string"},
+                "metric_key": {"type": "string",
+                               "description": "from development_options"},
+                "direction": {"type": "string",
+                              "enum": ["increase", "decrease", "target_band"]},
+                "target_value": {"type": "number"},
+                "detail": {"type": "string"},
+                "review_on": {"type": "string", "description": "YYYY-MM-DD"},
+            },
+            "required": ["player", "title"],
+        },
+    },
+    {
+        "name": "propose_intervention",
+        "description": "Draft an intervention -- a grip, cue, drill or program change "
+                       "-- for the coach to confirm. This does NOT save anything. "
+                       "Logging one is what lets a later change be measured against "
+                       "something, so propose it when a coach describes work he is "
+                       "actually doing with a player. Never invent the work itself; "
+                       "draft only what the coach told you.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string"},
+                "title": {"type": "string"},
+                "category": {"type": "string",
+                             "enum": ["grip", "pitch_shape", "bat_path", "drill",
+                                      "approach", "strength", "mechanical_cue"]},
+                "detail": {"type": "string"},
+                "intervention_date": {"type": "string", "description": "YYYY-MM-DD"},
+                "review_on": {"type": "string", "description": "YYYY-MM-DD"},
+            },
+            "required": ["player", "title"],
+        },
+    },
+    {
         "name": "pitch_arsenal",
         "description": "What each of a pitcher's pitches DOES, from his Rapsodo "
                        "bullpens: per pitch type the velocity, max, spin, induced "
@@ -1059,6 +1211,19 @@ obvious deeper view -- a pitcher question has his Rapsodo dashboard, a developme
 question has his hub profile -- end with that one link. One or two links, never a menu \
 of everything.
 
+PROPOSING WORK
+
+- You can draft a goal or an intervention with propose_goal / propose_intervention.
+  You never save anything: the coach sees the draft and confirms it. Call
+  development_options first so the draft is valid.
+- A goal is worth proposing when the conversation lands on something worth tracking
+  and there is a metric to track it with. An intervention is worth proposing when the
+  coach describes work he is doing -- logging it is what makes the next comparison
+  mean something.
+- Draft ONLY what the coach said or what the data supports. Never invent the work, and
+  never propose mechanics you cannot see.
+- Say in your reply what you drafted and that it is waiting on his confirmation.
+
 WHAT NOT TO DO
 
 - Never invent a number. Answer only from tool results. If a tool returns empty or an
@@ -1154,6 +1319,16 @@ def _sanitize_links(text):
         return label            # invented or off-system -- text only
 
     return _LINK.sub(keep, text)
+
+
+def answer_with_proposals(history, ip, focus=None):
+    """(reply text, drafts raised during this turn). See answer()."""
+    _pending.items = []
+    text = answer(history, ip, focus=focus)
+    drafts = getattr(_pending, "items", []) or []
+    _pending.items = []
+    # Only drafts survive to the caller; nothing here has touched the database.
+    return text, drafts
 
 
 def answer(history, ip, focus=None):

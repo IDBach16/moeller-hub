@@ -69,6 +69,22 @@
   background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy);
   font-weight:700;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
 .ag-input button:disabled{opacity:.5;cursor:wait}
+/* a draft the agent raised -- nothing is saved until the coach clicks */
+.ag-draft{align-self:flex-start;max-width:88%;background:rgba(197,165,90,.09);
+  border:1px solid rgba(197,165,90,.35);border-radius:12px;padding:.75rem .95rem}
+.ag-draft .k{font-family:ui-monospace,Consolas,monospace;font-size:.6rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--gold)}
+.ag-draft .t{font-size:.92rem;font-weight:700;margin:.2rem 0 .1rem}
+.ag-draft .d{font-size:.78rem;color:rgba(255,255,255,.6);line-height:1.5}
+.ag-draft .row{display:flex;gap:.5rem;margin-top:.7rem;align-items:center}
+.ag-draft button{padding:.4rem .9rem;border-radius:8px;border:none;cursor:pointer;
+  font-size:.76rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  font-family:inherit}
+.ag-draft .yes{background:linear-gradient(135deg,var(--gold),var(--gold-light));
+  color:var(--navy)}
+.ag-draft .no{background:transparent;border:1px solid rgba(255,255,255,.2);
+  color:rgba(255,255,255,.6)}
+.ag-draft .said{font-size:.78rem;color:#8fd9a4}
 .pcard{
   display:block;text-decoration:none;color:var(--white);
   background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;
@@ -346,9 +362,10 @@
 
   // Links come back as [[Label|URL]]; escape everything, then convert only
   // that pattern, and only for hub-relative or https URLs.
+  const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
   function linkify(text){
-    const esc = t => t.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',
-      '"':'&quot;',"'":'&#39;'}[c]));
     return esc(text).replace(/\[\[([^\]|]{1,120})\|([^\]\s]{1,300})\]\]/g,
       (m, label, url) => {
         if(!/^(\/[^\/]|https:\/\/)/.test(url)) return label;
@@ -364,6 +381,60 @@
     if(cls === 'ag-bot'){ el.innerHTML = linkify(text); } else { el.textContent = text; }
     msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
     return el;
+  }
+
+  // The agent drafts; only this click writes. The payload is re-validated
+  // server-side, so a tampered one is refused exactly like a bad form post.
+  function draftCard(p, canWrite){
+    const el = document.createElement('div');
+    el.className = 'ag-draft';
+    const bits = [];
+    if(p.metric_key) bits.push(p.metric_key + ' ' + (p.direction || '') +
+                               (p.target_value != null ? ' to ' + p.target_value : ''));
+    if(p.category) bits.push(p.category.replace('_', ' '));
+    if(p.intervention_date) bits.push(p.intervention_date);
+    if(p.review_on) bits.push('review ' + p.review_on);
+    if(p.detail) bits.push(p.detail);
+    el.innerHTML =
+      '<div class="k">' + (p.kind === 'goal' ? 'Goal' : 'Intervention') +
+      ' \u00b7 ' + esc(p.player) + ' \u00b7 draft</div>' +
+      '<div class="t">' + esc(p.title) + '</div>' +
+      (bits.length ? '<div class="d">' + esc(bits.join(' \u00b7 ')) + '</div>' : '');
+    const row = document.createElement('div');
+    row.className = 'row';
+    if(canWrite === false){
+      row.innerHTML = '<span class="d">Saving is disabled on this server.</span>';
+    } else {
+      const yes = document.createElement('button');
+      yes.className = 'yes'; yes.textContent = 'Log it';
+      const no = document.createElement('button');
+      no.className = 'no'; no.textContent = 'Discard';
+      const said = document.createElement('span');
+      said.className = 'said';
+      no.addEventListener('click', () => el.remove());
+      yes.addEventListener('click', async () => {
+        yes.disabled = no.disabled = true; said.textContent = 'Saving\u2026';
+        try{
+          const r = await fetch('/api/development/apply',
+            {method:'POST', headers:{'Content-Type':'application/json'},
+             body: JSON.stringify(p)});
+          const out = await r.json().catch(function(){ return {}; });
+          if(r.ok && out.ok){
+            said.textContent = 'Logged \u2014 it\'s on his profile now.';
+            yes.remove(); no.remove();
+          } else {
+            said.textContent = out.error || 'Could not save.';
+            yes.disabled = no.disabled = false;
+          }
+        }catch(e){
+          said.textContent = 'Could not reach the server.';
+          yes.disabled = no.disabled = false;
+        }
+      });
+      row.appendChild(yes); row.appendChild(no); row.appendChild(said);
+    }
+    el.appendChild(row);
+    msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
   }
 
   async function ask(q){
@@ -384,6 +455,7 @@
                   : (d.error || 'Something went wrong \u2014 try again.');
       bubble('ag-bot', reply);
       if(r.ok && d.reply) hist.push({role:'assistant', text:d.reply});
+      (d.proposals || []).forEach(p => draftCard(p, d.can_write));
     }catch(e){
       typing.remove();
       bubble('ag-bot', 'Could not reach the assistant.');
