@@ -134,15 +134,26 @@ def card(engine, token):
         return None
 
     sessions = p.get("training") or []
+    is_p = p["player"]["is_pitcher"]
+
+    # What he did in games. For a hitter this is his ONLY percentile -- there is
+    # no bat-tracking data yet -- so without it half the roster opens this page
+    # and finds nothing about themselves.
+    awre_name = (p.get("aliases") or {}).get("awre") or p["player"]["name"]
+    game = percentiles.game_strip(awre_name, "pitching" if is_p else "hitting")
+    game_bat = percentiles.game_strip(awre_name, "hitting") if is_p else None
+
     # His own words-level answers, in the order he cares about them.
     return {
         "name": p["player"]["name"],
         "class_year": p["player"]["class_year"],
         "pos": p["player"]["pos"],
-        "is_pitcher": p["player"]["is_pitcher"],
+        "is_pitcher": is_p,
         "sessions_n": len(sessions),
         "last_session": sessions[0] if sessions else None,
-        "strip": strip(engine, player_id) if p["player"]["is_pitcher"] else None,
+        "strip": strip(engine, player_id) if is_p else None,
+        "game": game,
+        "game_bat": game_bat,
         # Only what cleared detection, and only against his OWN baseline.
         "changes": p.get("changes") or [],
         "goals": p.get("goals") or [],

@@ -89,8 +89,35 @@ def main():
     ok("the page names him", c and c["name"].split()[0] in body)
     ok("the page has no link back into the hub",
        'href="/players' not in body and 'href="/team' not in body)
-    ok("percentiles are labelled as Moeller-only",
-       ("Moeller pitchers only" in body) or ("Where you rank" not in body))
+    # Any percentile on this page must name the population it came from. A
+    # bare "88th" reads as 88th in high school baseball, which it is not.
+    # Checked structurally rather than by heading text, because an empty-state
+    # block can carry the same heading with no percentile under it.
+    def labelled(html):
+        if 'class="track"' not in html:              # no bars drawn at all
+            return True
+        return "Moeller" in html and (
+            "not against high school" in html or "college, or pro" in html)
+
+    ok("every percentile shown names its population", labelled(body))
+
+    # The check above is vacuous on a player with no bars, so run it again on
+    # someone who actually has some.
+    with engine.connect() as conn:
+        everyone = [r.id for r in conn.execute(select(db.players.c.id))]
+    for pid in everyone:
+        tok = playerlink.issue(engine, pid)
+        page = client.get("/me/" + tok).get_data(as_text=True)
+        playerlink.revoke(engine, pid)
+        if 'class="track"' in page:
+            ok("a player WITH percentiles names the population too",
+               labelled(page))
+            ok("his bars carry an ordinal, not a bare number",
+               "th</span>" in page or "st</span>" in page
+               or "nd</span>" in page or "rd</span>" in page)
+            break
+    else:
+        print("  [skip] nobody in this database renders a percentile bar")
     r2 = client.get("/me/" + t)
     ok("a revoked token 404s", r2.status_code == 404, r2.status_code)
     ok("the 404 does not say whether the token ever existed",

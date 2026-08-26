@@ -471,13 +471,24 @@ def create_app():
             if card and card.get("has_data") else {}
         # One strip per pitch type -- "is his slider any good" is a different
         # question from "is his fastball any good".
+        import percentiles
         strips = []
         if p["player"]["is_pitcher"]:
-            import percentiles
             strips = percentiles.by_pitch(_engine(), p["player"]["id"])
+        # In-season, from the charted games. The only percentiles a hitter can
+        # have until there is bat data, and the game layer for a pitcher.
+        awre_name = p["aliases"].get("awre") or p["player"]["name"]
+        game_strip = percentiles.game_strip(
+            awre_name, "pitching" if p["player"]["is_pitcher"] else "hitting",
+            request.args.get("gyear"))
+        # A two-way player deserves both; his bat is not a footnote.
+        game_bat = None
+        if p["player"]["is_pitcher"]:
+            game_bat = percentiles.game_strip(awre_name, "hitting",
+                                              request.args.get("gyear"))
         return render_template(
             "player.html", nav="players", p=p, card=card, slog=slog,
-            strips=strips,
+            strips=strips, game_strip=game_strip, game_bat=game_bat,
             writes_enabled=writes_enabled(),
             metric_options=development.goal_metric_options(),
             directions=db.GOAL_DIRECTIONS,

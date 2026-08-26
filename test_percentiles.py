@@ -17,6 +17,96 @@ def ok(label, cond, detail=""):
         FAILED.append(label)
 
 
+def _floors(spec):
+    return {label: min_n for _k, label, _u, _h, min_n in spec}
+
+
+def game():
+    print("ordinals")
+    o = percentiles.ordinal
+    ok("33 is 33rd, not 33th", o(33) == "33rd", o(33))
+    ok("1/2/3 take st/nd/rd", (o(1), o(2), o(3)) == ("1st", "2nd", "3rd"))
+    ok("the teens are all th", (o(11), o(12), o(13)) == ("11th", "12th", "13th"),
+       (o(11), o(12), o(13)))
+    ok("0 and 100 read sanely", (o(0), o(100)) == ("0th", "100th"))
+
+    import agent
+    df = agent._season_df()
+    pit = df[df["PitcherTeam"] == "Moeller"].groupby("Pitcher").size()
+    bat = df[df["BatterTeam"] == "Moeller"].groupby("Batter").size()
+    if pit.empty or bat.empty:
+        print("  [skip] no charted game data")
+        return
+
+    print("in-season strips")
+    workhorse = str(pit.idxmax())
+    s = percentiles.game_strip(workhorse, "pitching")
+    ok("a heavily-used pitcher gets a strip", s and s["bars"], workhorse)
+    if s:
+        ok("it is scoped to one season", isinstance(s["year"], int))
+        ok("the season is one he actually played", s["year"] in s["years"])
+        ok("every bar is a real percentile",
+           all(0 <= b["pct"] <= 100 for b in s["bars"]))
+        ok("each bar names its sample and its pool",
+           all(b["n"] and b["pool_n"] >= 2 for b in s["bars"]))
+        floors = _floors(percentiles.GAME_PITCHING)
+        ok("no bar is drawn below its measured floor",
+           all(b["n"] >= floors[b["label"]] for b in s["bars"]),
+           [(b["label"], b["n"], floors[b["label"]]) for b in s["bars"]])
+
+    print("polarity")
+    # Strikeout rate is the one metric where LOW is good. Drop the inversion and
+    # the best contact hitter on the team ranks last.
+    ranked = []
+    for name in bat[bat >= 150].index:
+        g = percentiles.game_strip(str(name), "hitting")
+        k = next((b for b in (g or {}).get("bars", [])
+                  if b["label"] == "Strikeout%"), None)
+        if k:
+            ranked.append((str(name), k["value"], k["pct"], k["lower_better"]))
+    if len(ranked) >= 3:
+        ranked.sort(key=lambda r: r[1])                 # lowest K% first
+        ok("the lowest strikeout rate gets the HIGHEST percentile",
+           ranked[0][2] > ranked[-1][2],
+           "%s K%%=%.1f -> %d  vs  %s K%%=%.1f -> %d"
+           % (ranked[0][0], ranked[0][1], ranked[0][2],
+              ranked[-1][0], ranked[-1][1], ranked[-1][2]))
+        ok("it is flagged so the page can say 'lower is better'",
+           all(r[3] for r in ranked))
+    else:
+        print("  [skip] too few hitters with 150+ pitches")
+
+    print("floors")
+    thin_seen = False
+    for name in bat[(bat >= 20) & (bat < 80)].index[:10]:
+        g = percentiles.game_strip(str(name), "hitting")
+        if g and g["thin"]:
+            thin_seen = True
+            ok("a thin sample is named, never ranked (%s)" % name,
+               all(t["n"] < t["need"] for t in g["thin"]))
+            hfloors = _floors(percentiles.GAME_HITTING)
+            ok("and it is not silently on the strip too",
+               not any(b["label"] == t["label"]
+                       for b in g["bars"] for t in g["thin"]))
+            ok("the shortfall it reports is the real floor",
+               all(t["need"] == hfloors[t["label"]] for t in g["thin"]))
+            break
+    if not thin_seen:
+        print("  [skip] no thin-sample hitter in this data")
+
+    print("rejected metrics stay rejected")
+    hl = [l for _k, l, *_ in percentiles.GAME_HITTING]
+    pl = [l for _k, l, *_ in percentiles.GAME_PITCHING]
+    ok("chase% is off the hitting strip (r = 0.52, marginal)",
+       not any("hase" in l for l in hl), hl)
+    ok("walk rate is off the hitting strip (r = 0.12, noise)",
+       not any("alk" in l or l.startswith("BB") for l in hl), hl)
+    ok("swing% is off it too -- a percentile implies a direction",
+       "Swing%" not in hl, hl)
+    ok("chase-thrown% is off the pitching strip (r = 0.00, noise)",
+       not any("hase" in l for l in pl), pl)
+
+
 def main():
     print("the maths")
     ok("lowest of five is 0th", percentiles._pct([1, 2, 3, 4, 5], 1) == 0)
@@ -83,6 +173,9 @@ def main():
             ok("the player card and the coach profile agree",
                same and [b["pct"] for b in same["bars"]]
                      == [b["pct"] for b in one["bars"]])
+
+    print()
+    game()
 
     print()
     if FAILED:

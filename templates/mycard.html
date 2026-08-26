@@ -51,6 +51,9 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
 .pctnum{font-size:.66rem;font-weight:800;color:var(--gold-light);
   background:rgba(197,165,90,.14);border-radius:99px;padding:.1rem .42rem;
   margin-left:.35rem;white-space:nowrap}
+/* Without this, an 88th percentile for a LOW strikeout rate looks identical to
+   an 88th percentile for a high one. */
+.lowb{margin-left:.35rem;font-size:.62rem;color:rgba(255,255,255,.35)}
 .track{position:relative;height:8px;border-radius:99px;margin-top:.45rem;
   background:rgba(255,255,255,.08)}
 .fill{position:absolute;inset:0 auto 0 0;border-radius:99px;
@@ -94,6 +97,30 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
     {%- if c.sessions_n %} · {{ c.sessions_n }} tracked session{{ '' if c.sessions_n == 1 else 's' }}{% endif %}
   </div>
 
+  {# ---- What he did in games. First, because it is what he actually did, and
+     because for a hitter it is the only ranking that exists. ---- #}
+  {% for gs in [c.game, c.game_bat] if gs and gs.bars %}
+  <section class="card">
+    <h2>{{ gs.year }} games &mdash;
+      {{ 'on the mound' if gs.side == 'pitching' else 'at the plate' }}</h2>
+    <p class="note">Against the Moeller teammates who played enough that
+      season &mdash; not against high school baseball at large.</p>
+    {% for b in gs.bars %}
+    <div class="bar">
+      <div class="top">
+        <span class="lab">{{ b.label }}<span class="pctnum">{{ b.ord }}</span>
+          {%- if b.lower_better %}<span class="lowb">lower is better</span>{% endif %}</span>
+        <span class="val num">{{ b.value }}<small>{{ b.unit }}</small></span>
+      </div>
+      <div class="track">
+        <div class="fill" style="width:{{ b.pct }}%"></div>
+        <div class="dot" style="left:{{ b.pct }}%"></div>
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+
   {# ---- Where he ranks. The headline for a player; a coach reads it last. ---- #}
   {% if c.strip and c.strip.enough %}
   <section class="card">
@@ -106,7 +133,7 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
     {% for b in c.strip.bars %}
     <div class="bar">
       <div class="top">
-        <span class="lab">{{ b.label }}<span class="pctnum">{{ b.pct }}th</span></span>
+        <span class="lab">{{ b.label }}<span class="pctnum">{{ b.ord }}</span></span>
         <span class="val num">{{ b.value }}<small>{{ b.unit }}</small></span>
       </div>
       <div class="track">
@@ -130,6 +157,22 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
         before a ranking means anything.
       {% else %}
         No Rapsodo data on you yet. Once you throw a tracked pen this fills in.
+      {% endif %}
+    </p>
+  </section>
+  {% endif %}
+
+  {# A position player with no charted PAs would otherwise open his link and
+     find an empty page, which is worse than being told why it is empty. #}
+  {% if not c.is_pitcher and not (c.game and c.game.bars) %}
+  <section class="card">
+    <h2>Where you rank</h2>
+    <p class="empty">
+      {% if c.game and c.game.thin %}
+        You have {{ c.game.total }} charted pitches in {{ c.game.year }} &mdash;
+        not quite enough to rank yet. A few more games and this fills in.
+      {% else %}
+        Nothing charted for you yet. Once you get game reps this fills in.
       {% endif %}
     </p>
   </section>

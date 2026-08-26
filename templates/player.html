@@ -47,9 +47,26 @@
   transform:translate(-50%,-50%);background:var(--gold);
   border:2px solid var(--navy-deep)}
 .pctnum{grid-area:num;font-family:ui-monospace,Consolas,monospace;
-  font-size:1.05rem;font-weight:800;color:var(--gold-light);
-  min-width:2.9rem;text-align:right}
-.pctnum sup{font-size:.55em;font-weight:700;opacity:.7}
+  font-size:1rem;font-weight:800;color:var(--gold-light);
+  min-width:3.1rem;text-align:right}
+/* Two layers, one question: what he did in games, and what the stuff is. */
+.pctblock{margin-top:1.1rem;padding-top:.9rem;
+  border-top:1px solid rgba(255,255,255,.08)}
+.pctblock:first-of-type{margin-top:.7rem;padding-top:0;border-top:none}
+.pcthead{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;
+  margin-bottom:.7rem}
+.pctwhat{font-size:.78rem;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--white)}
+.pcthint,.pctyears{font-size:.72rem;color:rgba(255,255,255,.4)}
+.pctyears{display:flex;gap:.3rem;margin-left:auto}
+.pctyear{padding:.1rem .45rem;border-radius:6px;text-decoration:none;
+  color:rgba(255,255,255,.45);font-family:ui-monospace,Consolas,monospace}
+a.pctyear:hover{color:var(--gold-light);background:rgba(255,255,255,.05)}
+.pctyear.on{background:var(--gold-dim);color:var(--gold);font-weight:700}
+/* A down arrow on the label, because a high percentile for a LOW strikeout
+   rate is otherwise indistinguishable from a high strikeout rate. */
+.lowb{margin-left:.3rem;font-size:.72rem;color:rgba(255,255,255,.35)}
+.pctthin{margin-top:.7rem}
 
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:.9rem}
 .tile{
@@ -403,12 +420,63 @@ td.strong{color:var(--white);font-weight:700}
      against the arms he is measured with. Both are needed and neither
      substitutes for the other. One strip per pitch -- pooling a fastball's
      15" of ride with a slider's 2" would rank neither. #}
-  {% if strips %}
+  {% if strips or game_strip or game_bat %}
   <section class="panel">
     <h2>Where he ranks</h2>
-    <p class="hint">Against Moeller pitchers with enough tracked data of the
-      same pitch &mdash; not against high school baseball at large. Shape and
-      arm strength only: none of these measure command.</p>
+    <p class="hint">Against his own teammates &mdash; not against high school
+      baseball at large. Every metric shown here was reliability-tested first;
+      anything that could not rank a player at Moeller sample sizes was left
+      off rather than drawn faintly.</p>
+
+    {# ---- In games. For a hitter this is the whole panel; for a pitcher it is
+       the half that says what the stuff actually did. ---- #}
+    {% for gs in [game_strip, game_bat] if gs %}
+    <div class="pctblock">
+      <div class="pcthead">
+        <span class="pctwhat">In games &mdash;
+          {{ 'on the mound' if gs.side == 'pitching' else 'at the plate' }}</span>
+        {% if gs.years|length > 1 %}
+        <span class="pctyears">
+          {% for y in gs.years %}
+          <a href="?gyear={{ y }}"
+             class="pctyear{{ ' on' if y == gs.year }}">{{ y }}</a>
+          {% endfor %}
+        </span>
+        {% else %}
+        <span class="pctyears"><span class="pctyear on">{{ gs.year }}</span></span>
+        {% endif %}
+      </div>
+      {% if gs.bars %}
+      <div class="pctgrid">
+        {% for b in gs.bars %}
+        <div class="pctbar">
+          <div class="pctrow">
+            <span class="pctlab">{{ b.label }}{% if b.lower_better %}<span class="lowb" title="Lower is better">&darr;</span>{% endif %}</span>
+            <span class="pctval">{{ b.value }}<small>{{ b.unit }}</small></span>
+          </div>
+          <div class="pcttrack">
+            <div class="pctfill" style="width:{{ b.pct }}%"></div>
+            <div class="pctdot" style="left:{{ b.pct }}%"></div>
+          </div>
+          <div class="pctnum">{{ b.ord }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if gs.thin %}
+      <p class="hint pctthin">Not enough {{ gs.year }} sample to rank:
+        {% for t in gs.thin %}{{ t.label }} ({{ t.value }}{{ t.unit }}, {{ t.n }} of
+        {{ t.need }} needed){{ ', ' if not loop.last }}{% endfor %}.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    {% if strips %}
+    <div class="pctblock">
+      <div class="pcthead">
+        <span class="pctwhat">In the bullpen &mdash; Rapsodo</span>
+        <span class="pcthint">shape and arm strength only, never command</span>
+      </div>
 
     {% if strips|length > 1 %}
     <div class="pcttabs">
@@ -438,12 +506,14 @@ td.strong{color:var(--white);font-weight:700}
             <div class="pctfill" style="width:{{ b.pct }}%"></div>
             <div class="pctdot" style="left:{{ b.pct }}%"></div>
           </div>
-          <div class="pctnum">{{ b.pct }}<sup>th</sup></div>
+          <div class="pctnum">{{ b.ord }}</div>
         </div>
         {% endfor %}
       </div>
     </div>
     {% endfor %}
+    </div>
+    {% endif %}
   </section>
   {% endif %}
 
