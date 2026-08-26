@@ -16,6 +16,41 @@
   padding:.5rem .65rem;font-family:ui-monospace,Consolas,monospace;font-size:.8rem}
 .plink .hint{margin-top:.55rem}
 
+/* ---- Where he ranks: percentile strip, one pane per pitch type ---- */
+.pcttabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.9rem 0 .2rem}
+.pcttab{display:flex;align-items:center;gap:.4rem;cursor:pointer;
+  background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
+  border-radius:8px;padding:.34rem .6rem;color:rgba(255,255,255,.6);
+  font-size:.76rem;font-weight:700;letter-spacing:.04em}
+.pcttab:hover{color:var(--gold-light)}
+.pcttab.on{background:var(--gold-dim);border-color:var(--gold);color:var(--gold)}
+.pcttab .pn{font-family:ui-monospace,Consolas,monospace;font-size:.66rem;
+  color:rgba(255,255,255,.4);font-weight:600}
+.pctpool{margin:.55rem 0 .8rem}
+/* Two columns on a desktop, one on a phone -- six bars in a single column is a
+   lot of scrolling for something a coach reads at a glance. */
+.pctgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));
+  gap:.55rem 1.6rem}
+.pctbar{display:grid;grid-template-columns:1fr auto;
+  grid-template-areas:"row num" "track num";column-gap:.7rem;align-items:center}
+.pctrow{grid-area:row;display:flex;justify-content:space-between;
+  align-items:baseline;gap:.6rem}
+.pctlab{font-size:.8rem;color:rgba(255,255,255,.72)}
+.pctval{font-family:ui-monospace,Consolas,monospace;font-size:.86rem;
+  font-weight:700;white-space:nowrap}
+.pctval small{font-size:.64rem;color:rgba(255,255,255,.4);margin-left:.12rem}
+.pcttrack{grid-area:track;position:relative;height:7px;border-radius:99px;
+  margin-top:.28rem;background:rgba(255,255,255,.08)}
+.pctfill{position:absolute;inset:0 auto 0 0;border-radius:99px;
+  background:linear-gradient(90deg,rgba(197,165,90,.4),var(--gold))}
+.pctdot{position:absolute;top:50%;width:13px;height:13px;border-radius:50%;
+  transform:translate(-50%,-50%);background:var(--gold);
+  border:2px solid var(--navy-deep)}
+.pctnum{grid-area:num;font-family:ui-monospace,Consolas,monospace;
+  font-size:1.05rem;font-weight:800;color:var(--gold-light);
+  min-width:2.9rem;text-align:right}
+.pctnum sup{font-size:.55em;font-weight:700;opacity:.7}
+
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:.9rem}
 .tile{
   background:rgba(15,15,30,.5);border:1px solid var(--glass-border);
@@ -362,6 +397,55 @@ td.strong{color:var(--white);font-weight:700}
       <span class="muted" id="sumMsg"></span>
     </div>
   </section>
+
+  <!-- ============ 1b. WHERE HE RANKS ============ -->
+  {# Current status (below) compares him against HIMSELF; this compares him
+     against the arms he is measured with. Both are needed and neither
+     substitutes for the other. One strip per pitch -- pooling a fastball's
+     15" of ride with a slider's 2" would rank neither. #}
+  {% if strips %}
+  <section class="panel">
+    <h2>Where he ranks</h2>
+    <p class="hint">Against Moeller pitchers with enough tracked data of the
+      same pitch &mdash; not against high school baseball at large. Shape and
+      arm strength only: none of these measure command.</p>
+
+    {% if strips|length > 1 %}
+    <div class="pcttabs">
+      {% for s in strips %}
+      <button type="button" class="pcttab{{ ' on' if loop.first }}"
+              data-pt="{{ s.pitch }}">
+        <span class="rap-sw" data-pt="{{ s.pitch }}"></span>{{ s.pitch }}
+        <span class="pn">{{ s.n }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% for s in strips %}
+    <div class="pctpane" data-pt="{{ s.pitch }}"{% if not loop.first %} hidden{% endif %}>
+      <p class="hint pctpool">{{ s.n }} tracked {{ s.pitch }}s &middot; ranked against
+        {{ s.pool_n }} {% if s.pool != 'the staff' %}{{ 'JV' if s.pool == 'jv' else s.pool|title }}{% else %}staff{% endif %}
+        arm{{ '' if s.pool_n == 1 else 's' }} with {{ s.pitch }} data.</p>
+      <div class="pctgrid">
+        {% for b in s.bars %}
+        <div class="pctbar">
+          <div class="pctrow">
+            <span class="pctlab">{{ b.label }}</span>
+            <span class="pctval">{{ b.value }}<small>{{ b.unit }}</small></span>
+          </div>
+          <div class="pcttrack">
+            <div class="pctfill" style="width:{{ b.pct }}%"></div>
+            <div class="pctdot" style="left:{{ b.pct }}%"></div>
+          </div>
+          <div class="pctnum">{{ b.pct }}<sup>th</sup></div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
 
   <!-- ============ 2. CURRENT STATUS ============ -->
   {% if p.status %}
@@ -948,6 +1032,18 @@ function toggle(btnId, formId, cancelId){
 }
 toggle('showGoal', 'goalForm', 'cancelGoal');
 toggle('showIv', 'ivForm', 'cancelIv');
+
+/* Percentile strip: one pane per pitch type. */
+(function(){
+  const tabs = document.querySelectorAll('.pcttab');
+  if(!tabs.length) return;
+  tabs.forEach(t => t.addEventListener('click', () => {
+    const pt = t.dataset.pt;
+    tabs.forEach(x => x.classList.toggle('on', x === t));
+    document.querySelectorAll('.pctpane').forEach(
+      p => { p.hidden = p.dataset.pt !== pt; });
+  }));
+})();
 
 /* The player link. Issuing is idempotent server-side -- clicking twice hands
    back the same URL rather than invalidating the one already on his phone. */

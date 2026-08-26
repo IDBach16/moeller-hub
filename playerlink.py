@@ -13,7 +13,8 @@ be taken back, and a coach cannot see whether it was ever opened.
 Percentiles here are against MOELLER ARMS ONLY. That is the honest population
 we have, and the card says so in as many words -- a percentile that reads like
 Savant's but is computed off forty high-school pitchers would be a lie of
-presentation, not of arithmetic.
+presentation, not of arithmetic. The maths lives in percentiles.py, shared with
+the coach profile so the two surfaces can never drift apart.
 """
 import secrets
 from datetime import datetime
@@ -21,30 +22,7 @@ from datetime import datetime
 from sqlalchemy import select, update
 
 import db
-import rapsodo_card
-
-# A pitcher needs this many tracked pitches of a type before he is ranked on it,
-# or put into anyone else's ranking. Below it the average is still moving around
-# with each rep and a percentile says more about attendance than about stuff.
-MIN_N = 10
-
-# Enough same-level peers to make "vs varsity" mean something; under it the card
-# falls back to the whole staff and says which population it used.
-MIN_PEERS = 6
-
-# What a pitcher sees on his strip, in this order. Each is (key, label, unit,
-# higher_is_better). Every one of these is shape or arm strength -- nothing here
-# is a command metric, because the bullpen unit's location data does not predict
-# game command (measured, r = -0.73) and putting it on a kid's card would tell
-# him something untrue about himself.
-STRIP = [
-    ("velo", "Velocity", "mph", True),
-    ("max", "Top velo", "mph", True),
-    ("spin", "Spin rate", "rpm", True),
-    ("eff", "Spin efficiency", "%", True),
-    ("ivb", "Ride (IVB)", "in", True),
-    ("run", "Run", "in", True),
-]
+import percentiles
 
 
 # ---------------------------------------------------------------------------
@@ -131,78 +109,10 @@ def link_status(engine, player_id):
 # The card
 # ---------------------------------------------------------------------------
 
-def _pct(values, mine):
-    """Percentile of `mine` within `values` (which includes him)."""
-    others = [v for v in values if v is not None]
-    if len(others) < 2:
-        return None
-    below = sum(1 for v in others if v < mine)
-    ties = sum(1 for v in others if v == mine) - 1        # exclude himself
-    return int(round(100.0 * (below + 0.5 * max(ties, 0)) / (len(others) - 1)))
-
-
-def _run(mix_row, throws):
-    """Arm-side run as a magnitude.
-
-    A lefty's horizontal break is negative by definition, so ranking on the raw
-    number would sort every left-hander to the bottom of a column that has
-    nothing to do with how good the pitch is.
-    """
-    hb = mix_row.get("hb")
-    if hb is None:
-        return None
-    return abs(hb)
-
-
-def strip(engine, player_id, throws_by_id=None):
-    """Percentile bars for this pitcher's most-thrown pitch."""
-    cards = rapsodo_card.roster_cards(engine)
-    mine = cards.get(player_id)
-    if not mine or not mine.get("mix"):
-        return None
-
-    with engine.connect() as conn:
-        throws = {r.id: r.throws for r in conn.execute(
-            select(db.players.c.id, db.players.c.throws))}
-
-    # His bread and butter, not necessarily his fastball -- a reliever who
-    # throws 60% sliders should be ranked on the slider.
-    best = max(mine["mix"], key=lambda m: m["n"])
-    if best["n"] < MIN_N:
-        return {"pitch": best["pt"], "n": best["n"], "enough": False,
-                "min_n": MIN_N}
-
-    level = mine.get("level")
-    peers = []
-    for pid, card in cards.items():
-        row = next((m for m in card.get("mix", []) if m["pt"] == best["pt"]), None)
-        if row and row["n"] >= MIN_N:
-            peers.append((pid, card, row))
-
-    same = [p for p in peers if p[1].get("level") == level and level]
-    pool, pool_label = ((same, level) if len(same) >= MIN_PEERS
-                        else (peers, "the staff"))
-
-    bars = []
-    for key, label, unit, higher_better in STRIP:
-        if key == "run":
-            mine_v = _run(best, throws.get(player_id))
-            vals = [_run(r, throws.get(pid)) for pid, _c, r in pool]
-        else:
-            mine_v = best.get(key)
-            vals = [r.get(key) for _pid, _c, r in pool]
-        if mine_v is None:
-            continue
-        vals = [v for v in vals if v is not None]
-        pct = _pct(vals, mine_v)
-        if pct is None:
-            continue
-        bars.append({"label": label, "value": mine_v, "unit": unit,
-                     "pct": pct if higher_better else 100 - pct})
-
-    return {"pitch": best["pt"], "n": best["n"], "enough": True,
-            "bars": bars, "pool": pool_label, "pool_n": len(pool),
-            "level": level}
+def strip(engine, player_id):
+    """Percentile bars for this pitcher's most-thrown pitch. The maths is in
+    percentiles.py so the coach profile and this card cannot disagree."""
+    return percentiles.best_pitch(engine, player_id)
 
 
 def card(engine, token):
