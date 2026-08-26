@@ -534,16 +534,23 @@ td.strong{color:var(--white);font-weight:700}
         arm{{ '' if s.pool_n == 1 else 's' }} with {{ s.pitch }} data.</p>
       <div class="pctgrid">
         {% for b in s.bars %}
-        <div class="pctbar">
+        <div class="pctbar{{ ' norank' if b.no_rank }}">
           <div class="pctrow">
-            <span class="pctlab">{{ b.label }}</span>
+            <span class="pctlab">{{ b.label }}
+              {%- if b.blurb %}<span class="pctblurb">{{ b.blurb }}</span>{% endif %}</span>
             <span class="pctval">{{ b.display }}<small>{{ b.unit }}</small></span>
           </div>
+          {% if b.no_rank %}
+          {# Release height is a trait, not a virtue -- neither end of the
+             distribution is the good end, so there is no bar to fill. #}
+          <div class="pctnorank">shown, not ranked</div>
+          {% else %}
           <div class="pcttrack">
             <div class="pctfill" style="width:{{ b.pct }}%"></div>
             <div class="pctdot" style="left:{{ b.pct }}%"></div>
           </div>
           <div class="pctnum">{{ b.ord }}</div>
+          {% endif %}
         </div>
         {% endfor %}
       </div>

@@ -17,14 +17,6 @@ def ok(label, cond, detail=""):
         FAILED.append(label)
 
 
-def _a_pitcher():
-    """The Moeller pitcher with the most charted pitches."""
-    import agent
-    df = agent._season_df()
-    g = df[df["PitcherTeam"] == "Moeller"].groupby("Pitcher").size()
-    return str(g.idxmax()) if len(g) else None
-
-
 def _a_hitter():
     """The Moeller batter with the most charted pitches."""
     import agent
@@ -69,22 +61,6 @@ def game():
         ok("no bar is drawn below its measured floor",
            all(b["n"] >= floors[b["label"]] for b in s["bars"]),
            [(b["label"], b["n"], floors[b["label"]]) for b in s["bars"]])
-
-    print("unranked metrics")
-    _p = _a_pitcher()
-    ps = percentiles.game_strip(_p, "pitching") if _p else None
-    if ps:
-        nr = [b for b in ps["bars"] if b.get("no_rank")]
-        ok("BABIP against is present as a number",
-           any(b["label"].startswith("BABIP") for b in nr),
-           [b["label"] for b in ps["bars"]])
-        ok("it carries no percentile and no ordinal",
-           all(b["pct"] is None and not b["ord"] for b in nr))
-        # It needs no comparison pool -- requiring one withheld it entirely,
-        # because only four pitchers cleared the sample floor.
-        ok("and it is not withheld for want of a pool",
-           not any(t["label"].startswith("BABIP") for t in ps["thin"]),
-           [t["label"] for t in ps["thin"]])
 
     print("polarity")
     # Strikeout rate is the one metric where LOW is good. Drop the inversion and
@@ -139,8 +115,8 @@ def game():
     pk = {k for k, *_ in percentiles.GAME_PITCHING}
     ok("the pitching strip is exactly the qualified set",
        pk == {"fb_velo", "strike_pct", "bb_pct", "k_pct", "whiff_pct",
-              "chase_pct", "ahead_pct", "woba", "fps_pct", "moestuff",
-              "babip"}, sorted(pk))
+              "chase_pct", "ahead_pct", "woba", "fps_pct", "moestuff"},
+       sorted(pk))
     ok("the hitting strip is exactly the qualified set",
        hk == {"contact_pct", "zcontact_pct", "k2_pct", "zswing_pct",
               "aswing_pct", "k_pct", "ob_pct", "xbh_pct", "woba", "babip",
@@ -154,8 +130,9 @@ def game():
     # mostly defence and bounce (r = 0.29).
     pdir = {k: h for k, _l, _u, h, _n, _b in percentiles.GAME_PITCHING}
     hdir = {k: h for k, _l, _u, h, _n, _b in percentiles.GAME_HITTING}
-    ok("a pitcher's BABIP is shown but never ranked", pdir["babip"] is None)
-    ok("a hitter's BABIP IS ranked, higher being better", hdir["babip"] is True)
+    ok("BABIP is a hitter's stat only -- the pitcher's is off the strip "
+       "(r = 0.29: his defence and the bounce, not him)",
+       "babip" not in pdir and hdir["babip"] is True)
     ok("MoeStuff+ and MoeSwing+ are both higher-is-better",
        pdir["moestuff"] is True and hdir["moeswing"] is True)
 
@@ -202,7 +179,18 @@ def main():
     ok("missing break yields no bar", percentiles._run({"hb": None}) is None)
 
     print("what is measured")
-    keys = [k for k, _l, _u, _h in percentiles.STRIP]
+    keys = [k for k, _l, _u, _h, _b in percentiles.STRIP]
+    labels = {k: l for k, l, _u, _h, _b in percentiles.STRIP}
+    dirs = {k: h for k, _l, _u, h, _b in percentiles.STRIP}
+    ok("break is named for what it is, not for jargon",
+       labels["ivb"] == "Vertical break" and labels["run"] == "Horizontal break",
+       (labels["ivb"], labels["run"]))
+    ok("release height is on the strip", "rel_h" in keys, keys)
+    # Neither end of the release-height distribution is the good end: a lower
+    # slot flattens a fastball, a higher one steepens a curve.
+    ok("release height is shown but never ranked", dirs["rel_h"] is None)
+    ok("every bullpen metric carries a blurb",
+       all(b and len(b) > 4 for *_r, b in percentiles.STRIP))
     ok("no command metric is on the strip",
        not any(k in keys for k in ("strike", "strike_pct", "zone", "location")),
        keys)
@@ -220,8 +208,13 @@ def main():
         one = percentiles.best_pitch(engine, pid)
         ok("his best pitch is ranked", one and one.get("enough"), one)
         if one and one.get("enough"):
-            ok("every bar is a real percentile",
-               all(0 <= b["pct"] <= 100 for b in one["bars"]))
+            ok("every ranked bar is a real percentile",
+               all(0 <= b["pct"] <= 100
+                   for b in one["bars"] if not b.get("no_rank")))
+            ok("release height rides along with a number and no rank",
+               any(b["label"] == "Release height" and b["pct"] is None
+                   for b in one["bars"]),
+               [b["label"] for b in one["bars"]])
             ok("he is ranked on his most-thrown pitch",
                one["pitch"] == max(cards[pid]["mix"],
                                    key=lambda m: m["n"])["pt"])
@@ -244,6 +237,9 @@ def main():
             ok("the player card and the coach profile agree",
                same and [b["pct"] for b in same["bars"]]
                      == [b["pct"] for b in one["bars"]])
+            ok("and they agree on the labels too",
+               same and [b["label"] for b in same["bars"]]
+                     == [b["label"] for b in one["bars"]])
 
     print()
     game()

@@ -26,17 +26,24 @@ MIN_N = 10
 # comparison falls back to the whole staff and says which population it used.
 MIN_PEERS = 6
 
-# (key, label, unit, higher_is_better). Shape and arm strength only -- no
-# command metric appears here, because bullpen location does not predict game
-# command in this data (measured, r = -0.73) and a percentile built on it would
-# tell a pitcher something untrue about himself.
+# (key, label, unit, higher_is_better, blurb). Shape and arm strength only --
+# no command metric appears here, because bullpen location does not predict
+# game command in this data (measured, r = -0.73) and a percentile built on it
+# would tell a pitcher something untrue about himself.
 STRIP = [
-    ("velo", "Velocity", "mph", True),
-    ("max", "Top velo", "mph", True),
-    ("spin", "Spin rate", "rpm", True),
-    ("eff", "Spin efficiency", "%", True),
-    ("ivb", "Ride (IVB)", "in", True),
-    ("run", "Run", "in", True),
+    ("velo", "Velocity", "mph", True, "average off the unit"),
+    ("max", "Top velo", "mph", True, "his best rep"),
+    ("spin", "Spin rate", "rpm", True, "revolutions per minute"),
+    ("eff", "Spin efficiency", "%", True, "how much of the spin moves the ball"),
+    ("ivb", "Vertical break", "in", True, "induced, with gravity taken out"),
+    # Ranked as a magnitude -- see _run(). A left-hander's horizontal break is
+    # negative by definition, which is handedness, not shape.
+    ("run", "Horizontal break", "in", True, "arm-side, as a distance"),
+    # NOT ranked. Release height is a trait, not a virtue: a lower slot flattens
+    # a fastball's approach angle and a higher one steepens a curveball, so
+    # neither end of this distribution is the good end. The number is worth
+    # seeing -- a gold bar next to it would tell a kid that taller is better.
+    ("rel_h", "Release height", "ft", None, "where the ball leaves his hand"),
 ]
 
 
@@ -79,9 +86,14 @@ def _one(cards, player_id, pitch, level):
                         else (peers, "the staff"))
 
     bars = []
-    for key, label, unit, higher_better in STRIP:
+    for key, label, unit, higher_better, blurb in STRIP:
         mine_v = _run(mine) if key == "run" else mine.get(key)
         if mine_v is None:
+            continue
+        if higher_better is None:
+            bars.append({"label": label, "value": mine_v, "unit": unit,
+                         "display": mine_v, "blurb": blurb, "no_rank": True,
+                         "pct": None, "ord": ""})
             continue
         vals = [(_run(r) if key == "run" else r.get(key)) for _c, r in pool]
         pct = _pct(vals, mine_v)
@@ -89,7 +101,8 @@ def _one(cards, player_id, pitch, level):
             continue
         rank = pct if higher_better else 100 - pct
         bars.append({"label": label, "value": mine_v, "unit": unit,
-                     "display": mine_v, "pct": rank, "ord": ordinal(rank)})
+                     "display": mine_v, "blurb": blurb,
+                     "pct": rank, "ord": ordinal(rank)})
     if not bars:
         return None
     return {"pitch": pitch, "n": mine["n"], "bars": bars,
@@ -251,14 +264,6 @@ GAME_PITCHING = [
      "of the at-bats he started"),
     ("moestuff",   "MoeStuff+",         "",    True,  60,
      "the Pitcher Card's own score -- 100 is the staff average"),
-    # BABIP against is deliberately NOT ranked. It came back r = 0.29 even on
-    # the game-date split: a pitcher's hits-per-ball-in-play is mostly his
-    # defence and the bounce of the ball, which is the oldest finding in
-    # baseball analytics and it reproduces here. Ian asked for the number, so
-    # the number is shown -- with no percentile, because ranking a staff on it
-    # would rank them on luck.
-    ("babip",      "BABIP against",     "%",   None,  20,
-     "hits per ball in play -- mostly defence and luck, so not ranked"),
 ]
 
 # Zone-win% (strikes + chases drawn, r = 0.60) qualified and is still absent:
@@ -288,9 +293,12 @@ GAME_HITTING = [
      "of his plate appearances"),
     ("woba",         "wOBA",            "",  True,  40,
      "every outcome weighted by what it is worth"),
-    # The mirror image of the pitcher's: a HITTER's BABIP does hold up
-    # (r = 0.93 at 30+ balls in play). Hitting it where they aren't is a skill;
-    # preventing it is mostly not.
+    # BABIP is a HITTER's stat only. His holds up (r = 0.93 at 30+ balls in
+    # play) because hitting it where they aren't is repeatable. The pitcher's
+    # version was built, measured at r = 0.29 on the game-date split, shown
+    # unranked for one commit, and then removed at Ian's call -- a number on a
+    # card invites a conclusion whatever the caption says, and there is no
+    # conclusion to draw from a staff's batting-average-on-balls-in-play.
     ("babip",        "BABIP",           "%",  True,  30,
      "hits per ball he put in play"),
     ("moeswing",     "MoeSwing+",       "",   True,  30,
@@ -463,14 +471,10 @@ def _game_table(year, side):
             n_pa = int(len(pa))
             outside = g[g["AttackZone"].isin(_OUT_ZONE)]
             first = g[(g["Balls"] == 0) & (g["Strikes"] == 0)]
-            bip = pa[pa["AtBatResult"].isin(_BIP)]
             out[str(name)] = {
                 "fps_pct": _rate(int((first["PitchResult"] != "Ball").sum()),
                                  len(first)),
                 "fps_pct_n": int(len(first)),
-                "babip": _rate(int(bip["AtBatResult"].isin(_HITS[:3]).sum()),
-                               len(bip)),
-                "babip_n": int(len(bip)),
                 "moestuff": (round(float(g["_stuff"].mean()) / staff_avg * 100, 1)
                              if staff_avg else None),
                 "moestuff_n": int(len(g)),

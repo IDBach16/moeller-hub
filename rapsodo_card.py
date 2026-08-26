@@ -99,7 +99,8 @@ def roster_cards(engine):
             .where(db.sessions.c.source == "rapsodo")
             .where(db.pitch_metrics.c.metric_key.in_(
                 ["velocity", "induced_vertical_break", "horizontal_break",
-                 "spin_axis", "is_strike", "spin_rate", "spin_efficiency"]))).all()
+                 "spin_axis", "is_strike", "spin_rate", "spin_efficiency",
+                 "release_height"]))).all()
         levels = {r.player_id: r.level for r in conn.execute(
             select(db.player_seasons.c.player_id, db.player_seasons.c.level))}
 
@@ -137,6 +138,11 @@ def roster_cards(engine):
                    if d.get("induced_vertical_break") else None,
             "hb": round(sum(d["horizontal_break"]) / len(d["horizontal_break"]), 1)
                   if d.get("horizontal_break") else None,
+            # Where the ball leaves his hand. Pooled per pitch here because the
+            # percentile strip reads it per pitch; slot itself is a property of
+            # the delivery, not of one pitch.
+            "rel_h": round(sum(d["release_height"]) / len(d["release_height"]), 2)
+                     if d.get("release_height") else None,
         })
         if pt == "FB":
             card["fb"] = round(sum(velos) / len(velos), 1)
