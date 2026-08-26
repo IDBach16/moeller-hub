@@ -70,6 +70,7 @@ a.pctyear:hover{color:var(--gold-light);background:rgba(255,255,255,.05)}
 /* A metric with no defensible direction, or too noisy to rank, keeps its
    number and loses the bar. */
 .pctbar.norank .pctval{color:rgba(255,255,255,.75)}
+.pctbar.small .pctlab,.pctbar.small .pctval{opacity:.8}
 .pctnorank{grid-area:track;font-size:.66rem;color:rgba(255,255,255,.28);
   margin-top:.3rem;font-style:italic}
 /* "of batters faced", "on swings at strikes" -- half these metrics are not
@@ -468,16 +469,20 @@ td.strong{color:var(--white);font-weight:700}
       {% if gs.bars %}
       <div class="pctgrid">
         {% for b in gs.bars %}
-        <div class="pctbar{{ ' norank' if b.no_rank }}">
+        <div class="pctbar{{ ' norank' if b.no_rank }}{{ ' small' if b.small }}">
           <div class="pctrow">
             <span class="pctlab">{{ b.label }}{% if b.lower_better %}<span class="lowb" title="Lower is better">&darr;</span>{% endif %}
               {%- if b.blurb %}<span class="pctblurb">{{ b.blurb }}</span>{% endif %}</span>
             <span class="pctval">{{ b.display }}<small>{{ b.unit }}</small></span>
           </div>
           {% if b.no_rank %}
-          {# No bar at all -- a filled track reads as "good", and this one has
-             no good. #}
-          <div class="pctnorank">shown, not ranked</div>
+          {# Three different reasons a bar has no rank, and they mean different
+             things: the metric has no good end, HIS sample is short, or the
+             FIELD was. The number is shown in all three. #}
+          <div class="pctnorank">
+            {%- if b.small %}{{ b.n }} of {{ b.need }} &mdash; too few to rank
+            {%- elif b.pool_short %}only {{ b.pool_n }} teammates qualified
+            {%- else %}shown, not ranked{% endif %}</div>
           {% else %}
           <div class="pcttrack">
             <div class="pctfill" style="width:{{ b.pct }}%"></div>
@@ -491,18 +496,10 @@ td.strong{color:var(--white);font-weight:700}
       {% endif %}
       {# Two different reasons a metric is missing, and they mean opposite
          things about the player: his sample is short, or the FIELD is. #}
-      {% set short_him = gs.thin|rejectattr('pool_short')|list %}
-      {% set short_field = gs.thin|selectattr('pool_short')|list %}
-      {% if short_him %}
-      <p class="hint pctthin">Not enough of his own {{ gs.year }} sample to rank:
-        {% for t in short_him %}{{ t.label }} ({{ t.display }}{{ t.unit }},
-        {{ t.n }} of {{ t.need }} needed){{ ', ' if not loop.last }}{% endfor %}.</p>
-      {% endif %}
-      {% if short_field %}
-      <p class="hint pctthin">He qualifies, but too few teammates did in
-        {{ gs.year }} for a ranking to mean anything:
-        {% for t in short_field %}{{ t.label }} ({{ t.display }}{{ t.unit }},
-        only {{ t.pool_n }} qualified){{ ', ' if not loop.last }}{% endfor %}.</p>
+      {% if gs.thin %}
+      <p class="hint pctthin">Too little {{ gs.year }} data to show at all:
+        {% for t in gs.thin %}{{ t.label }} ({{ t.n }} of {{ t.need }})
+        {{- ', ' if not loop.last }}{% endfor %}.</p>
       {% endif %}
 
     </div>

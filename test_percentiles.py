@@ -84,6 +84,37 @@ def game():
     else:
         print("  [skip] too few hitters with 150+ pitches")
 
+    print("everybody sees numbers")
+    # A bench player opening his page to find nothing is the worst outcome this
+    # page can produce, so below the ranking floor the number is still shown --
+    # without a percentile his sample cannot support.
+    import agent as _ag
+    _df = _ag._season_df()
+    _b = _df[(_df["Year"] == 2026) & (_df["BatterTeam"] == "Moeller")]
+    _counts = _b.groupby("Batter").size().sort_values(ascending=False)
+    _blank = []
+    for _nm, _n in _counts.items():
+        if _n < 50:
+            continue                       # genuinely too little to print
+        _s = percentiles.game_strip(str(_nm), "hitting", 2026)
+        if not _s or not _s["bars"]:
+            _blank.append((str(_nm), int(_n)))
+    ok("every hitter with 50+ charted pitches sees at least one number",
+       not _blank, _blank)
+
+    ok("the show floor is below the rank floor but never trivial",
+       percentiles._show_floor(60) == 24
+       and percentiles._show_floor(20) == percentiles.SHOW_ABS_MIN,
+       (percentiles._show_floor(60), percentiles._show_floor(20)))
+
+    _thin_guy = percentiles.game_strip("Kayde Ridley", "hitting", 2026)
+    if _thin_guy:
+        _sm = [b for b in _thin_guy["bars"] if b.get("small")]
+        ok("a short-sample bar carries the number but no rank",
+           _sm and all(b["pct"] is None and b["display"] for b in _sm))
+        ok("and it says how far short he is",
+           all(b["n"] < b["need"] for b in _sm))
+
     print("floors")
     thin_seen = False
     for name in bat[(bat >= 20) & (bat < 80)].index[:10]:
@@ -91,8 +122,7 @@ def game():
         if g and g["thin"]:
             thin_seen = True
             ok("a thin sample is named, never ranked (%s)" % name,
-               all(t["n"] < t["need"] or t.get("pool_short")
-                   for t in g["thin"]))
+               all(t["n"] < t["need"] for t in g["thin"]))
             hfloors = _floors(percentiles.GAME_HITTING)
             ok("and it is not silently on the strip too",
                not any(b["label"] == t["label"]

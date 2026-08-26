@@ -275,7 +275,7 @@ GAME_PITCHING = [
 # reliable: a percentile implies a direction, and swinging more is an approach,
 # not a better one. Every metric below has a defensible right answer.
 GAME_HITTING = [
-    ("contact_pct",  "Contact%",        "%", True,  60,
+    ("contact_pct",  "Contact%",        "%", True,  40,
      "of his swings"),
     ("zcontact_pct", "Zone contact%",   "%", True,  50,
      "on swings at strikes"),
@@ -285,7 +285,7 @@ GAME_HITTING = [
      "does he go after strikes"),
     ("aswing_pct",   "Hitter-count swing%", "%", True, 50,
      "attacks when he is ahead"),
-    ("k_pct",        "Strikeout%",      "%", False, 40,
+    ("k_pct",        "Strikeout%",      "%", False, 20,
      "of his plate appearances"),
     ("ob_pct",       "Reached base%",   "%", True,  40,
      "hit, walk or hit-by-pitch"),
@@ -304,6 +304,21 @@ GAME_HITTING = [
     ("moeswing",     "MoeSwing+",       "",   True,  30,
      "the Hitter Card's own score -- 100 is the team average"),
 ]
+
+# Below the ranking floor a metric is still SHOWN -- just without a percentile.
+# Most of the roster is not a starter, and a bench player opening his page to
+# find nothing about himself is the worst outcome this page can produce. He
+# gets his numbers; he does not get a rank his sample cannot support.
+#
+# The absolute minimum is separate and real: at four plate appearances a
+# strikeout rate of 25% is one strikeout, and printing that helps nobody.
+SHOW_FRACTION = 0.4
+SHOW_ABS_MIN = 10
+
+
+def _show_floor(min_n):
+    return max(SHOW_ABS_MIN, int(round(min_n * SHOW_FRACTION)))
+
 
 # A per-player floor is not enough on its own. If only two teammates clear it,
 # the only percentiles that exist are 0th and 100th, and 87.5% two-strike
@@ -607,9 +622,17 @@ def game_strip(name, side, year=None):
         if val is None:
             continue
         if n < min_n:
-            thin.append({"label": label, "value": round(val, 3),
-                         "display": _show(key, val), "unit": unit,
-                         "n": n, "need": min_n})
+            if n >= _show_floor(min_n):
+                # Enough for the number to mean something, not enough to rank.
+                bars.append({"label": label, "value": round(val, 3),
+                             "display": _show(key, val), "unit": unit,
+                             "blurb": blurb, "n": n, "pool_n": None,
+                             "no_rank": True, "small": True,
+                             "need": min_n, "pct": None, "ord": ""})
+            else:
+                thin.append({"label": label, "value": round(val, 3),
+                             "display": _show(key, val), "unit": unit,
+                             "n": n, "need": min_n})
             continue
         # An unranked metric is just a number, so it needs no comparison pool
         # at all. Checking one withheld BABIP against entirely -- only four
@@ -627,13 +650,14 @@ def game_strip(name, side, year=None):
         vals = [r[key] for r in table.values()
                 if r.get(key) is not None and (r.get(key + "_n") or 0) >= min_n]
         if len(vals) < MIN_POOL:
-            # Too few teammates qualified to make a percentile mean anything.
-            # He is not short of sample -- the field is -- so say that instead
-            # of quoting him a rank out of two.
-            thin.append({"label": label, "value": round(val, 3),
+            # Too few teammates qualified for a percentile to mean anything. He
+            # is not short of sample -- the field is -- so his own number is
+            # perfectly good and only the rank is withheld.
+            bars.append({"label": label, "value": round(val, 3),
                          "display": _show(key, val), "unit": unit,
-                         "n": n, "need": min_n, "pool_n": len(vals),
-                         "pool_short": True})
+                         "blurb": blurb, "n": n, "pool_n": len(vals),
+                         "no_rank": True, "pool_short": True,
+                         "pct": None, "ord": ""})
             continue
         pct = _pct(vals, val)
         if pct is None:

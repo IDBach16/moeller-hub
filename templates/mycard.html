@@ -130,7 +130,10 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
         <span class="val num">{{ b.display }}<small>{{ b.unit }}</small></span>
       </div>
       {% if b.no_rank %}
-      <div class="norank">shown, not ranked</div>
+      <div class="norank">
+        {%- if b.small %}not enough yet to rank you &mdash; {{ b.n }} of {{ b.need }}
+        {%- elif b.pool_short %}too few teammates played enough to compare
+        {%- else %}shown, not ranked{% endif %}</div>
       {% else %}
       <div class="track">
         <div class="fill" style="width:{{ b.pct }}%"></div>
