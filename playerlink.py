@@ -140,8 +140,15 @@ def card(engine, token):
     # no bat-tracking data yet -- so without it half the roster opens this page
     # and finds nothing about themselves.
     awre_name = (p.get("aliases") or {}).get("awre") or p["player"]["name"]
-    game = percentiles.game_strip(awre_name, "pitching" if is_p else "hitting")
+    side = "pitching" if is_p else "hitting"
+    game = percentiles.game_strip(awre_name, side)
     game_bat = percentiles.game_strip(awre_name, "hitting") if is_p else None
+    # Only the pitches he has a real read on -- a player's card is not the
+    # place for four "not enough sample" notes in a row.
+    by_pitch = [s for s in percentiles.game_by_pitch(awre_name, side)
+                if s["bars"]]
+    by_pitch_bat = ([s for s in percentiles.game_by_pitch(awre_name, "hitting")
+                     if s["bars"]] if is_p else [])
 
     # His own words-level answers, in the order he cares about them.
     return {
@@ -154,6 +161,8 @@ def card(engine, token):
         "strip": strip(engine, player_id) if is_p else None,
         "game": game,
         "game_bat": game_bat,
+        "by_pitch": by_pitch,
+        "by_pitch_bat": by_pitch_bat,
         # Only what cleared detection, and only against his OWN baseline.
         "changes": p.get("changes") or [],
         "goals": p.get("goals") or [],

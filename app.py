@@ -478,17 +478,19 @@ def create_app():
         # In-season, from the charted games. The only percentiles a hitter can
         # have until there is bat data, and the game layer for a pitcher.
         awre_name = p["aliases"].get("awre") or p["player"]["name"]
-        game_strip = percentiles.game_strip(
-            awre_name, "pitching" if p["player"]["is_pitcher"] else "hitting",
-            request.args.get("gyear"))
+        gyear = request.args.get("gyear")
+        side = "pitching" if p["player"]["is_pitcher"] else "hitting"
+        game_strip = percentiles.game_strip(awre_name, side, gyear)
+        by_pitch = percentiles.game_by_pitch(awre_name, side, gyear)
         # A two-way player deserves both; his bat is not a footnote.
-        game_bat = None
+        game_bat, by_pitch_bat = None, []
         if p["player"]["is_pitcher"]:
-            game_bat = percentiles.game_strip(awre_name, "hitting",
-                                              request.args.get("gyear"))
+            game_bat = percentiles.game_strip(awre_name, "hitting", gyear)
+            by_pitch_bat = percentiles.game_by_pitch(awre_name, "hitting", gyear)
         return render_template(
             "player.html", nav="players", p=p, card=card, slog=slog,
             strips=strips, game_strip=game_strip, game_bat=game_bat,
+            by_pitch=by_pitch, by_pitch_bat=by_pitch_bat,
             writes_enabled=writes_enabled(),
             metric_options=development.goal_metric_options(),
             directions=db.GOAL_DIRECTIONS,

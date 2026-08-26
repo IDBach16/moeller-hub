@@ -17,6 +17,13 @@ def ok(label, cond, detail=""):
         FAILED.append(label)
 
 
+def _a_hitter():
+    """The Moeller batter with the most charted pitches."""
+    import agent
+    df = agent._season_df()
+    return str(df[df["BatterTeam"] == "Moeller"].groupby("Batter").size().idxmax())
+
+
 def _floors(spec):
     return {label: min_n for _k, label, _u, _h, min_n, _b in spec}
 
@@ -106,10 +113,10 @@ def game():
     pk = {k for k, *_ in percentiles.GAME_PITCHING}
     ok("the pitching strip is exactly the qualified set",
        pk == {"fb_velo", "strike_pct", "bb_pct", "k_pct", "whiff_pct",
-              "chase_pct", "ahead_pct"}, sorted(pk))
+              "chase_pct", "ahead_pct", "woba"}, sorted(pk))
     ok("the hitting strip is exactly the qualified set",
        hk == {"contact_pct", "zcontact_pct", "k2_pct", "zswing_pct",
-              "aswing_pct", "k_pct", "ob_pct", "xbh_pct"}, sorted(hk))
+              "aswing_pct", "k_pct", "ob_pct", "xbh_pct", "woba"}, sorted(hk))
     ok("the hitter's own walk rate is absent (r = 0.12 -- walks are done TO "
        "a hitter, not by him)", "bb_pct" not in hk)
     ok("no direction-free metric is ranked (swing%, first-pitch swing%)",
@@ -117,6 +124,121 @@ def game():
     ok("every metric carries a plain-English blurb",
        all(b and len(b) > 5 for *_r, b in
            percentiles.GAME_PITCHING + percentiles.GAME_HITTING))
+
+
+def by_pitch():
+    print("wOBA")
+    import pandas as pd
+    # Weights and denominator must match Hitter_Card exactly, or the hub and
+    # the printed card quote a player two different wOBAs.
+    ok("weights are the card's", percentiles._WOBA_W["HR"] == 2.10
+       and percentiles._WOBA_W["1B"] == .89
+       and percentiles._WOBA_W["2B"] == 1.27
+       and percentiles._WOBA_W["3B"] == 1.62
+       and percentiles._WOBA_W["BB"] == .69)
+    ok("a walk counts in the denominator", "BB" in percentiles._WOBA_DEN)
+    ok("a sacrifice does not inflate it",
+       "Sac Bunt" not in percentiles._WOBA_DEN)
+    pa = pd.DataFrame({"AtBatResult": ["HR", "BB", "Strike Out", "Ground Out"]})
+    got = percentiles._woba(pa)
+    ok("hand-computed wOBA matches", got == round((2.10 + .69) / 4, 3),
+       "%s vs %s" % (got, round((2.10 + .69) / 4, 3)))
+    ok("no plate appearances -> no wOBA",
+       percentiles._woba(pd.DataFrame({"AtBatResult": []})) is None)
+
+    print("value stays a number, display carries the formatting")
+    # Formatting the value in place made "15.7" < "6.5" a string comparison,
+    # which would have silently inverted the strikeout-polarity test rather
+    # than failing it. The two fields are kept separate for that reason.
+    st = percentiles.game_strip(_a_hitter(), "hitting")
+    if st and st["bars"]:
+        ok("every bar's value is numeric",
+           all(isinstance(b["value"], (int, float)) for b in st["bars"]),
+           [(b["label"], type(b["value"]).__name__) for b in st["bars"]])
+        ok("every bar has a printable display string",
+           all(isinstance(b["display"], str) and b["display"]
+               for b in st["bars"]))
+        w = next((b for b in st["bars"] if b["label"] == "wOBA"), None)
+        if w:
+            ok("wOBA prints to three places, batting-style", "." in w["display"]
+               and len(w["display"].split(".")[1]) == 3, w["display"])
+        r = next((b for b in st["bars"] if b["unit"] == "%"), None)
+        if r:
+            ok("a rate prints to exactly one place",
+               len(r["display"].split(".")[1]) == 1, r["display"])
+
+    print("pitch types come from the data, not a regrouping")
+    lbl = percentiles.PITCH_LABEL
+    ok("spelling variants collapse",
+       lbl["CurveBall"] == lbl["Curve"] == "Curveball"
+       and lbl["Fast Ball"] == "Fastball"
+       and lbl["Two Seam Fast Ball"] == "Sinker")
+    ok("Breaking Ball stays its own bucket, not merged into Slider",
+       lbl["Breaking Ball"] == "Breaking Ball" and lbl["Slider"] == "Slider")
+    ok("a slider is not called a fastball",
+       "Slider" not in percentiles._FASTBALL_FAMILY
+       and "Fastball" in percentiles._FASTBALL_FAMILY)
+
+    print("per-family qualification")
+    pk = {k: fams for k, _l, _u, _h, _n, _b, fams in percentiles.BY_PITCH_PITCHING}
+    hk = {k: fams for k, _l, _u, _h, _n, _b, fams in percentiles.BY_PITCH_HITTING}
+    # The headline finding: fastball whiff rate does not correlate with itself
+    # (r = 0.33) while breaking-ball whiff rate does (r = 0.69).
+    ok("pitcher whiff% is withheld on fastballs", "fb" not in pk["whiff_pct"])
+    ok("pitcher whiff% is shown on everything else", "off" in pk["whiff_pct"])
+    ok("chases drawn is shown on both", set(pk["chase_pct"]) == {"fb", "off"})
+    ok("hitter zone-swing is withheld on fastballs (r = 0.59)",
+       "fb" not in hk["zswing_pct"])
+    ok("hitter contact% and wOBA are shown on both",
+       set(hk["contact_pct"]) == {"fb", "off"} == set(hk["woba"]))
+
+    print("against the real roster")
+    import agent
+    df = agent._season_df()
+    bat = df[df["BatterTeam"] == "Moeller"].groupby("Batter").size()
+    if bat.empty:
+        print("  [skip] no charted data")
+        return
+    name = str(bat.idxmax())
+    strips = percentiles.game_by_pitch(name, "hitting")
+    ok("his most-seen hitter gets pitch-type strips", len(strips) >= 2, name)
+    if strips:
+        ok("ordered by how much he saw of it",
+           [s["n"] for s in strips] == sorted([s["n"] for s in strips],
+                                              reverse=True))
+        allbars = [b for s in strips for b in s["bars"]]
+        ok("nothing is ranked against fewer than the by-pitch pool floor",
+           all(b["pool_n"] >= percentiles.BY_PITCH_MIN_POOL for b in allbars),
+           [(b["label"], b["pool_n"]) for b in allbars])
+        ok("every ranked bar has a percentile and an ordinal",
+           all(0 <= b["pct"] <= 100 and b["ord"]
+               for b in allbars if not b.get("no_rank")))
+        # swing% has no right answer, so it must carry the number WITHOUT a rank
+        sw = [b for b in allbars if b["label"] == "Swing%"]
+        ok("swing% is shown but not ranked",
+           sw and all(b.get("no_rank") and b["pct"] is None for b in sw),
+           [(b["label"], b.get("no_rank")) for b in sw])
+        ok("no value is left unrounded",
+           all(len(str(b["value"]).split(".")[-1]) <= 3 for b in allbars),
+           [b["value"] for b in allbars][:6])
+        for s in strips:
+            ok("thin entries on %s are rounded too" % s["pitch"],
+               all(len(str(t["value"]).split(".")[-1]) <= 3 for t in s["thin"]),
+               [t["value"] for t in s["thin"]][:4])
+            break
+
+    print("fastball whiff is really absent for a pitcher")
+    pit = df[df["PitcherTeam"] == "Moeller"].groupby("Pitcher").size()
+    if not pit.empty:
+        pstrips = percentiles.game_by_pitch(str(pit.idxmax()), "pitching")
+        fb = next((s for s in pstrips
+                   if s["pitch"] in percentiles._FASTBALL_FAMILY), None)
+        if fb:
+            ok("no fastball whiff bar on a real pitcher",
+               not any(b["label"] == "Whiff%" for b in fb["bars"]),
+               [b["label"] for b in fb["bars"]])
+            ok("and it is not listed as merely thin either",
+               not any(t["label"] == "Whiff%" for t in fb["thin"]))
 
 
 def main():
@@ -188,6 +310,9 @@ def main():
 
     print()
     game()
+
+    print()
+    by_pitch()
 
     print()
     if FAILED:

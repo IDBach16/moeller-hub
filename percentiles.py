@@ -89,7 +89,7 @@ def _one(cards, player_id, pitch, level):
             continue
         rank = pct if higher_better else 100 - pct
         bars.append({"label": label, "value": mine_v, "unit": unit,
-                     "pct": rank, "ord": ordinal(rank)})
+                     "display": mine_v, "pct": rank, "ord": ordinal(rank)})
     if not bars:
         return None
     return {"pitch": pitch, "n": mine["n"], "bars": bars,
@@ -214,6 +214,93 @@ _WALKS = ("BB", "IBB")
 _IN_ZONE = ("Heart", "Shadow")
 _OUT_ZONE = ("Chase", "Waste")
 
+# Linear weights and the AB/PA vocabularies, copied from Hitter_Card so the hub
+# and the printed cards cannot disagree about a player's wOBA.
+_WOBA_W = {"BB": .69, "IBB": .69, "HBP": .72, "Catchers Interference": .72,
+           "1B": .89, "2B": 1.27, "3B": 1.62, "HR": 2.10}
+_AB_RESULTS = {"1B", "2B", "3B", "HR", "Strike Out", "Ground Out", "Fly Out",
+               "Line Out", "Double Play", "FC", "Fielders Choice", "Pop Out",
+               "Infield Fly", "Error"}
+_WOBA_DEN = _AB_RESULTS | {"BB", "IBB", "HBP", "Catchers Interference"}
+
+# Spelling variants only -- NOT a regrouping. The charted vocabulary differs by
+# side and that is real signal, not noise to be flattened: our charters log our
+# own pitchers finely (Sinker and Slider and Curve as distinct pitches) and log
+# opposing pitchers coarsely (Fastball / Breaking Ball / Change Up). Using the
+# types as charted lets each side show exactly the granularity it was recorded
+# at. "Breaking Ball" stays its own bucket because that is what somebody wrote
+# down; it is not silently merged into Slider.
+PITCH_LABEL = {
+    "Fast Ball": "Fastball", "Fastball": "Fastball",
+    "Two Seam Fast Ball": "Sinker", "Sinker": "Sinker",
+    "Cut Fastball": "Cutter", "Cutter": "Cutter",
+    "Breaking Ball": "Breaking Ball",
+    "Slider": "Slider",
+    "CurveBall": "Curveball", "Curve": "Curveball", "Curveball": "Curveball",
+    "Change Up": "Changeup", "Changeup": "Changeup",
+    "Splitter": "Splitter",
+}
+
+# What survives being split by pitch type. Each was screened the same way as
+# the overall strip, on the split samples themselves:
+#   hitting   contact% vs FB      r = 0.81      swing% vs FB     r = 0.79
+#             zone-swing% vs FB   r = 0.78      wOBA vs FB       r = 0.65
+#             swing% vs breaking  r = 0.78      wOBA vs breaking r = 0.79
+#   pitching  chases drawn vs BR  r = 0.76      strike% vs BR    r = 0.66
+#             chases drawn vs FB  r = 0.70      strike% vs FB    r = 0.64
+#             whiff% vs breaking  r = 0.62
+# Rate stats not listed here were marginal once split and are not shown per
+# pitch. Offspeed could not be screened at all -- 158 changeups were thrown to
+# the whole roster in 2026 -- so it simply falls under the sample floors rather
+# than being special-cased.
+# Which pitches behave like a fastball. A metric that qualifies on one family
+# does not automatically qualify on the other, and the split-half numbers say
+# so loudly: a PITCHER'S WHIFF RATE ON HIS FASTBALL IS NOISE (r = 0.33) WHILE
+# HIS WHIFF RATE ON BREAKING BALLS IS REAL (r = 0.69). Fastball swing-and-miss
+# at this level is mostly a property of the hitter who swung; breaking-ball
+# swing-and-miss is a property of the pitch. Showing both would put a number on
+# a card that means two different things depending on the row it is in.
+_FASTBALL_FAMILY = {"Fastball", "Sinker", "Cutter"}
+
+# (key, label, unit, higher_is_better, min_denominator, blurb, families)
+# families: which pitch families this metric qualified on. "off" covers every
+# non-fastball -- breaking balls, sliders, curves, changeups -- which is where
+# it was measured (r shown against each).
+BY_PITCH_HITTING = [
+    # contact% r = 0.61 fastball / 0.74 breaking
+    ("contact_pct", "Contact%",    "%", True, 20, "of his swings at it",
+     ("fb", "off")),
+    # no direction: offering more at a pitch is an approach, not a virtue, so
+    # this shows the number and withholds the rank.
+    ("swing_pct",   "Swing%",      "%", None, 60, "how often he offers",
+     ("fb", "off")),
+    # zone-swing r = 0.80 breaking, but only 0.59 on fastballs -- marginal, so
+    # it is not shown there.
+    ("zswing_pct",  "Zone swing%", "%", True, 20, "when it is a strike",
+     ("off",)),
+    # wOBA r = 0.71 fastball / 0.78 breaking
+    ("woba",        "wOBA",        "",  True, 16, "what he did with it",
+     ("fb", "off")),
+]
+BY_PITCH_PITCHING = [
+    # strike% r = 0.64 fastball / 0.66 breaking
+    ("strike_pct", "Strike%",       "%", True,  60, "of the ones he threw",
+     ("fb", "off")),
+    # whiff% r = 0.69 breaking, 0.33 on fastballs -- see _FASTBALL_FAMILY above
+    ("whiff_pct",  "Whiff%",        "%", True,  20, "swings he missed",
+     ("off",)),
+    # chases drawn r = 0.75 fastball / 0.80 breaking
+    ("chase_pct",  "Chases drawn%", "%", True,  20, "swings at it out of the zone",
+     ("fb", "off")),
+    ("woba",       "wOBA against",  "",  False, 16, "what hitters did with it",
+     ("fb", "off")),
+]
+
+# Pools are necessarily smaller once split by pitch, so this is looser than the
+# overall MIN_POOL of 6. Five still gives five distinct rungs (0/25/50/75/100)
+# rather than the 0-or-100 coin flip that two would.
+BY_PITCH_MIN_POOL = 5
+
 # (key, label, unit, higher_is_better, min_denominator, blurb)
 # The blurb is what the metric means in a coach's words -- these are not all
 # self-explanatory, and an unexplained percentile invites a wrong reading.
@@ -235,7 +322,14 @@ GAME_PITCHING = [
      "of the balls he threw, hitters swung"),
     ("ahead_pct",  "Ahead in count%",   "%",   True,  80,
      "pitches thrown with more strikes than balls"),
+    ("woba",       "wOBA against",      "",    False, 30,
+     "every outcome weighted by what it is worth"),
 ]
+
+# Zone-win% (strikes + chases drawn, r = 0.60) qualified and is still absent:
+# it is a linear combination of two bars already on the strip, so it adds a
+# number without adding information. Put-away% (K per two-strike PA) is on the
+# Pitcher Card but did NOT qualify here (r = 0.34) and is not carried over.
 
 # swing% and first-pitch swing% are deliberately absent although both are
 # reliable: a percentile implies a direction, and swinging more is an approach,
@@ -257,6 +351,8 @@ GAME_HITTING = [
      "hit, walk or hit-by-pitch"),
     ("xbh_pct",      "Extra-base hit%", "%", True,  40,
      "of his plate appearances"),
+    ("woba",         "wOBA",            "",  True,  40,
+     "every outcome weighted by what it is worth"),
 ]
 
 # A per-player floor is not enough on its own. If only two teammates clear it,
@@ -271,6 +367,30 @@ _game_lock = threading.Lock()
 
 def _rate(num, den):
     return (100.0 * num / den) if den else None
+
+
+def _show(key, val):
+    """How the number is PRINTED. Always alongside the numeric value, never
+    instead of it -- a formatted string sorts lexically, so "15.7" < "6.5" and
+    anything that compares these would be quietly wrong.
+
+    Rates read to one decimal (never %g: a column of 80 / 76.8 / 73.6 looks
+    like three different precisions). wOBA is a batting-style figure and reads
+    to three, so .600 does not get mistaken for a percentage.
+    """
+    if key == "woba":
+        return ("%.3f" % val).lstrip("0")
+    return "%.1f" % val
+
+
+def _woba(pa_rows):
+    """Weighted on-base average -- the one number that says what a plate
+    appearance was actually worth. Same weights as the Hitter Card."""
+    den = int(pa_rows["AtBatResult"].isin(_WOBA_DEN).sum())
+    if not den:
+        return None
+    num = sum(_WOBA_W.get(r, 0.0) for r in pa_rows["AtBatResult"])
+    return round(num / den, 3)
 
 
 def ordinal(n):
@@ -324,6 +444,8 @@ def _game_table(year, side):
                 "chase_pct_n": int(len(outside)),
                 "ahead_pct": _rate(int((g["Strikes"] > g["Balls"]).sum()), len(g)),
                 "ahead_pct_n": int(len(g)),
+                "woba": _woba(pa),
+                "woba_n": int(pa["AtBatResult"].isin(_WOBA_DEN).sum()),
                 "total": int(len(g)),
             }
     else:
@@ -362,6 +484,8 @@ def _game_table(year, side):
                 "ob_pct_n": n_pa,
                 "xbh_pct": _rate(int(pa["AtBatResult"].isin(_XBH).sum()), n_pa),
                 "xbh_pct_n": n_pa,
+                "woba": _woba(pa),
+                "woba_n": int(pa["AtBatResult"].isin(_WOBA_DEN).sum()),
                 "total": int(len(g)),
             }
 
@@ -405,7 +529,8 @@ def game_strip(name, side, year=None):
         if val is None:
             continue
         if n < min_n:
-            thin.append({"label": label, "value": round(val, 1), "unit": unit,
+            thin.append({"label": label, "value": round(val, 3),
+                         "display": _show(key, val), "unit": unit,
                          "n": n, "need": min_n})
             continue
         # Peers must clear the same floor, or a teammate with nine swings sets
@@ -416,7 +541,8 @@ def game_strip(name, side, year=None):
             # Too few teammates qualified to make a percentile mean anything.
             # He is not short of sample -- the field is -- so say that instead
             # of quoting him a rank out of two.
-            thin.append({"label": label, "value": round(val, 1), "unit": unit,
+            thin.append({"label": label, "value": round(val, 3),
+                         "display": _show(key, val), "unit": unit,
                          "n": n, "need": min_n, "pool_n": len(vals),
                          "pool_short": True})
             continue
@@ -424,7 +550,8 @@ def game_strip(name, side, year=None):
         if pct is None:
             continue
         rank = pct if higher_better else 100 - pct
-        bars.append({"label": label, "value": round(val, 1), "unit": unit,
+        bars.append({"label": label, "value": round(val, 3), "unit": unit,
+                     "display": _show(key, val),
                      "pct": rank, "ord": ordinal(rank), "blurb": blurb,
                      "n": n, "pool_n": len(vals),
                      "lower_better": not higher_better})
@@ -433,3 +560,141 @@ def game_strip(name, side, year=None):
         return None
     return {"year": year, "years": years, "side": side, "bars": bars,
             "thin": thin, "total": mine.get("total", 0)}
+
+
+# ---------------------------------------------------------------------------
+# Per pitch type
+# ---------------------------------------------------------------------------
+
+_bp_cache = {}
+_bp_lock = threading.Lock()
+
+
+def _by_pitch_table(year, side):
+    """{pitch label -> {player -> rates}} for one season.
+
+    Pitch types are the ones CHARTED, canonicalised for spelling only. That
+    means a Moeller pitcher shows Sinker and Slider separately (our charters
+    log our own arsenals that finely) while a Moeller hitter shows the coarser
+    Fastball / Breaking Ball / Changeup he was actually recorded as seeing.
+    Neither is forced into the other's shape.
+    """
+    key = (year, side)
+    with _bp_lock:
+        if key in _bp_cache:
+            return _bp_cache[key]
+
+    import agent
+    df = agent._season_df()
+    df = df[df["Year"] == year]
+    team, who = (("PitcherTeam", "Pitcher") if side == "pitching"
+                 else ("BatterTeam", "Batter"))
+    d = df[df[team] == "Moeller"].copy()
+    d["_pt"] = d["PitchType"].map(PITCH_LABEL)
+    d = d[d["_pt"].notna()]
+
+    out = {}
+    for label, byp in d.groupby("_pt"):
+        rows = {}
+        for name, g in byp.groupby(who):
+            sw = g["PitchResult"].isin(SWING_RESULTS)
+            n_sw = int(sw.sum())
+            zone = g[g["AttackZone"].isin(_IN_ZONE)]
+            outside = g[g["AttackZone"].isin(_OUT_ZONE)]
+            pa = g[g["AtBatResult"].notna() & (g["AtBatResult"] != "")]
+            rows[str(name)] = {
+                "contact_pct": _rate(
+                    n_sw - int((g["PitchResult"] == _WHIFF).sum()), n_sw),
+                "contact_pct_n": n_sw,
+                "whiff_pct": _rate(
+                    int((g["PitchResult"] == _WHIFF).sum()), n_sw),
+                "whiff_pct_n": n_sw,
+                "swing_pct": _rate(n_sw, len(g)),
+                "swing_pct_n": int(len(g)),
+                "strike_pct": _rate(int((g["PitchResult"] != "Ball").sum()), len(g)),
+                "strike_pct_n": int(len(g)),
+                "zswing_pct": _rate(
+                    int(zone["PitchResult"].isin(SWING_RESULTS).sum()), len(zone)),
+                "zswing_pct_n": int(len(zone)),
+                "chase_pct": _rate(
+                    int(outside["PitchResult"].isin(SWING_RESULTS).sum()),
+                    len(outside)),
+                "chase_pct_n": int(len(outside)),
+                "woba": _woba(pa),
+                "woba_n": int(pa["AtBatResult"].isin(_WOBA_DEN).sum()),
+                "n": int(len(g)),
+            }
+        out[label] = rows
+
+    with _bp_lock:
+        _bp_cache[key] = out
+    return out
+
+
+def game_by_pitch(name, side, year=None):
+    """One strip per pitch type he threw / saw enough of, that season.
+
+    Ordered by how much he saw of it, so the conversation starts with the pitch
+    that actually decides his at-bats.
+    """
+    years = game_years(name, side)
+    if not years:
+        return []
+    year = int(year) if year else years[0]
+
+    table = _by_pitch_table(year, side)
+    spec = BY_PITCH_PITCHING if side == "pitching" else BY_PITCH_HITTING
+    out = []
+
+    for label, rows in table.items():
+        mine = rows.get(name)
+        if not mine:
+            continue
+        fam = "fb" if label in _FASTBALL_FAMILY else "off"
+        bars, thin = [], []
+        for key, blabel, unit, higher_better, min_n, blurb, fams in spec:
+            if fam not in fams:
+                continue            # did not qualify on this family of pitch
+            val, n = mine.get(key), mine.get(key + "_n") or 0
+            if val is None:
+                continue
+            shown, numeric = _show(key, val), round(val, 3)
+            if n < min_n:
+                thin.append({"label": blabel, "value": numeric,
+                             "display": shown, "unit": unit,
+                             "n": n, "need": min_n})
+                continue
+            vals = [r[key] for r in rows.values()
+                    if r.get(key) is not None and (r.get(key + "_n") or 0) >= min_n]
+            if len(vals) < BY_PITCH_MIN_POOL:
+                thin.append({"label": blabel, "value": numeric,
+                             "display": shown, "unit": unit,
+                             "n": n, "need": min_n, "pool_n": len(vals),
+                             "pool_short": True})
+                continue
+            pct = _pct(vals, val)
+            if pct is None:
+                continue
+            # higher_better None means the metric has no right answer -- swing%
+            # against a pitch type is an approach, not a virtue. It is shown as
+            # a number with its rank suppressed, because a coach still wants to
+            # know he offers at 70% of the breaking balls he sees.
+            if higher_better is None:
+                bars.append({"label": blabel, "value": numeric,
+                             "display": shown,
+                             "unit": unit, "blurb": blurb, "n": n,
+                             "pool_n": len(vals), "no_rank": True,
+                             "pct": None, "ord": ""})
+                continue
+            rank = pct if higher_better else 100 - pct
+            bars.append({"label": blabel, "value": numeric,
+                         "display": shown,
+                         "unit": unit, "pct": rank, "ord": ordinal(rank),
+                         "blurb": blurb, "n": n, "pool_n": len(vals),
+                         "lower_better": not higher_better})
+        if bars or thin:
+            out.append({"pitch": label, "n": mine["n"], "bars": bars,
+                        "thin": thin})
+
+    out.sort(key=lambda x: -x["n"])
+    return out
