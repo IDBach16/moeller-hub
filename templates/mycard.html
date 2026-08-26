@@ -64,9 +64,15 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
 .chg:last-child{border-bottom:none}
 .chg .h{font-weight:700;font-size:.9rem}
 .chg .h.up{color:var(--up)} .chg .h.down{color:var(--down)}
+.chg .h.flat{color:var(--gold-light)}   /* moved, but not judged */
 .chg .d{color:rgba(255,255,255,.6);font-size:.82rem}
-.goal{padding:.55rem 0;border-bottom:1px solid rgba(255,255,255,.07)}
+.goal{padding:.6rem 0;border-bottom:1px solid rgba(255,255,255,.07)}
 .goal:last-child{border-bottom:none}
+.grow{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem}
+.glab{font-size:.88rem;font-weight:600}
+.gnow{font-size:.95rem;font-weight:700;white-space:nowrap}
+.gnow small{font-size:.66rem;color:rgba(255,255,255,.45);margin-left:.12rem}
+.gmeta{margin-top:.35rem;font-size:.76rem;color:rgba(255,255,255,.5)}
 .gtrack{height:6px;border-radius:99px;background:rgba(255,255,255,.08);margin-top:.4rem}
 .gfill{height:100%;border-radius:99px;background:var(--gold)}
 .empty{color:rgba(255,255,255,.45);font-size:.85rem}
@@ -137,12 +143,23 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
       <p class="empty">You're at {{ c.sessions_n }} tracked session{{ '' if c.sessions_n == 1 else 's' }}.
         It takes 3 to set your baseline — until then there's nothing honest to compare against.</p>
     {% elif c.changes %}
+      {# Three states, not two. favorable is None for a metric whose polarity is
+         'neutral' -- release side, horizontal break -- where the system knows
+         the number moved but NOT whether that is good. Painting those red tells
+         a kid his delivery went wrong when nobody concluded that. #}
       {% for ch in c.changes %}
       <div class="chg">
-        <div class="h {{ 'up' if ch.favorable else 'down' }}">
+        <div class="h {{ 'up' if ch.favorable else ('down' if ch.favorable is false else 'flat') }}">
           {{ ch.summary or ch.metric_key }}
         </div>
-        {% if ch.detected_on %}<div class="d">Spotted {{ ch.detected_on }}</div>{% endif %}
+        <div class="d">
+          {%- if ch.favorable is none %}A change, not a verdict — whether this
+            helps depends on what you and your coach are working on.
+          {%- elif ch.favorable %}Moving the right way.
+          {%- else %}Worth a conversation with your coach.
+          {%- endif %}
+          {% if ch.detected_on %}Spotted {{ ch.detected_on }}.{% endif %}
+        </div>
       </div>
       {% endfor %}
     {% else %}
@@ -155,14 +172,26 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
   {% if c.goals %}
   <section class="card">
     <h2>What you're working on</h2>
+    {# g.progress is a dict from profiles.goal_progress -- {state, current,
+       start, target, pct, remaining} -- not a bare percentage. #}
     {% for g in c.goals %}
+    {% set pr = g.progress %}
     <div class="goal">
-      <div class="top" style="display:flex;justify-content:space-between;gap:.6rem">
-        <span>{{ g.label or g.metric_key }}</span>
-        {% if g.current is not none %}<span class="num">{{ g.current }}</span>{% endif %}
+      <div class="grow">
+        <span class="glab">{{ g.title or g.metric_label or g.metric_key }}</span>
+        {% if pr and pr.current is not none %}
+        <span class="num gnow">{{ pr.current }}<small>{{ g.unit }}</small></span>
+        {% endif %}
       </div>
-      {% if g.progress is not none %}
-      <div class="gtrack"><div class="gfill" style="width:{{ [[g.progress, 0]|max, 100]|min }}%"></div></div>
+      {% if pr and pr.pct is not none %}
+      <div class="gtrack">
+        <div class="gfill" style="width:{{ [[pr.pct, 0]|max, 100]|min }}%"></div>
+      </div>
+      <div class="gmeta">
+        {% if pr.state == 'met' %}Hit it — target was {{ pr.target }}{{ g.unit }}.
+        {% else %}{{ pr.remaining }}{{ g.unit }} to go — target {{ pr.target }}{{ g.unit }}{% if g.review_on %}, checked {{ g.review_on }}{% endif %}.
+        {% endif %}
+      </div>
       {% endif %}
     </div>
     {% endfor %}

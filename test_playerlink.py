@@ -97,6 +97,40 @@ def main():
        "isn&#39;t active" in r2.get_data(as_text=True)
        or "isn't active" in r2.get_data(as_text=True))
 
+    # A player WITH a goal renders. The first cut of this page treated
+    # goal.progress as a bare percentage when it is a dict, and every card
+    # belonging to a player who had a goal returned 500 -- invisible until a
+    # goal-bearing player was opened, because the fixtures above have none.
+    with engine.connect() as conn:
+        g = conn.execute(select(db.goals.c.player_id, db.goals.c.title)
+                         .where(db.goals.c.status == "active")).first()
+    if g:
+        gt = playerlink.issue(engine, g.player_id)
+        rg = client.get("/me/" + gt)
+        ok("a player with an active goal renders", rg.status_code == 200,
+           rg.status_code)
+        ok("his goal is on the page", g.title[:18] in rg.get_data(as_text=True))
+        playerlink.revoke(engine, g.player_id)
+    else:
+        print("  [skip] no active goal in this database to render")
+
+    # A neutral-polarity change must not be painted as bad news. favorable is
+    # None for release side and horizontal break -- the system knows the number
+    # moved, not whether that is good -- and the first cut rendered every
+    # not-True value red, which tells a kid his delivery broke.
+    with engine.connect() as conn:
+        neu = conn.execute(select(db.change_events.c.player_id)
+                           .where(db.change_events.c.favorable.is_(None))).first()
+    if neu:
+        nt = playerlink.issue(engine, neu.player_id)
+        bn = client.get("/me/" + nt).get_data(as_text=True)
+        ok("a neutral change is not painted red", 'class="h down"' not in bn)
+        ok("a neutral change says it is not a verdict",
+           "not a verdict" in bn)
+        playerlink.revoke(engine, neu.player_id)
+    else:
+        print("  [skip] no neutral-polarity change in this database")
+
     playerlink.revoke(engine, a)                            # leave it clean
 
     print()
