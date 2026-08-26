@@ -57,6 +57,9 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
 /* Half these are not self-explanatory to a sixteen-year-old. Say what the
    denominator is rather than trusting him to guess. */
 .blurb{display:block;font-size:.68rem;color:rgba(255,255,255,.34);margin-top:.05rem}
+/* No bar where there is no better or worse -- a long bar reads as "good". */
+.norank{font-size:.68rem;color:rgba(255,255,255,.3);font-style:italic;
+  margin-top:.3rem}
 .bpblock{margin-top:1rem;padding-top:.75rem;
   border-top:1px dashed rgba(255,255,255,.09)}
 .bplab{display:flex;align-items:baseline;gap:.45rem;margin-bottom:.5rem;
@@ -111,8 +114,7 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
 
   {# ---- What he did in games. First, because it is what he actually did, and
      because for a hitter it is the only ranking that exists. ---- #}
-  {% for gs, bp in [(c.game, c.by_pitch), (c.game_bat, c.by_pitch_bat)]
-     if gs and gs.bars %}
+  {% for gs in [c.game, c.game_bat] if gs and gs.bars %}
   <section class="card">
     <h2>{{ gs.year }} games &mdash;
       {{ 'on the mound' if gs.side == 'pitching' else 'at the plate' }}</h2>
@@ -121,43 +123,23 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
     {% for b in gs.bars %}
     <div class="bar">
       <div class="top">
-        <span class="lab">{{ b.label }}<span class="pctnum">{{ b.ord }}</span>
+        <span class="lab">{{ b.label }}
+          {%- if not b.no_rank %}<span class="pctnum">{{ b.ord }}</span>{% endif %}
           {%- if b.lower_better %}<span class="lowb">lower is better</span>{% endif %}
           {%- if b.blurb %}<span class="blurb">{{ b.blurb }}</span>{% endif %}</span>
         <span class="val num">{{ b.display }}<small>{{ b.unit }}</small></span>
       </div>
+      {% if b.no_rank %}
+      <div class="norank">shown, not ranked</div>
+      {% else %}
       <div class="track">
         <div class="fill" style="width:{{ b.pct }}%"></div>
         <div class="dot" style="left:{{ b.pct }}%"></div>
       </div>
+      {% endif %}
     </div>
     {% endfor %}
 
-    {# By the pitch he threw or saw. Only pitches he has a real read on --
-       his own card is no place for a column of "not enough sample". #}
-    {% for s in bp %}
-    <div class="bpblock">
-      <div class="bplab">{{ s.pitch }}<span class="bpn">{{ s.n }} seen</span></div>
-      {% for b in s.bars %}
-      <div class="bar">
-        <div class="top">
-          <span class="lab">{{ b.label }}
-            {%- if not b.no_rank %}<span class="pctnum">{{ b.ord }}</span>{% endif %}
-            {%- if b.lower_better %}<span class="lowb">lower is better</span>{% endif %}</span>
-          <span class="val num">{{ b.display }}<small>{{ b.unit }}</small></span>
-        </div>
-        {% if b.no_rank %}
-        <div class="norank">not ranked &mdash; there's no better or worse here</div>
-        {% else %}
-        <div class="track">
-          <div class="fill" style="width:{{ b.pct }}%"></div>
-          <div class="dot" style="left:{{ b.pct }}%"></div>
-        </div>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </div>
-    {% endfor %}
   </section>
   {% endfor %}
 

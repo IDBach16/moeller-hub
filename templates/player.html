@@ -67,6 +67,11 @@ a.pctyear:hover{color:var(--gold-light);background:rgba(255,255,255,.05)}
    rate is otherwise indistinguishable from a high strikeout rate. */
 .lowb{margin-left:.3rem;font-size:.72rem;color:rgba(255,255,255,.35)}
 .pctthin{margin-top:.7rem}
+/* A metric with no defensible direction, or too noisy to rank, keeps its
+   number and loses the bar. */
+.pctbar.norank .pctval{color:rgba(255,255,255,.75)}
+.pctnorank{grid-area:track;font-size:.66rem;color:rgba(255,255,255,.28);
+  margin-top:.3rem;font-style:italic}
 /* "of batters faced", "on swings at strikes" -- half these metrics are not
    self-explanatory, and an unexplained percentile invites a wrong reading. */
 .pctblurb{display:block;font-size:.68rem;color:rgba(255,255,255,.33);
@@ -444,7 +449,7 @@ td.strong{color:var(--white);font-weight:700}
 
     {# ---- In games. For a hitter this is the whole panel; for a pitcher it is
        the half that says what the stuff actually did. ---- #}
-    {% for gs, bp in [(game_strip, by_pitch), (game_bat, by_pitch_bat)] if gs %}
+    {% for gs in [game_strip, game_bat] if gs %}
     <div class="pctblock">
       <div class="pcthead">
         <span class="pctwhat">In games &mdash;
@@ -463,17 +468,23 @@ td.strong{color:var(--white);font-weight:700}
       {% if gs.bars %}
       <div class="pctgrid">
         {% for b in gs.bars %}
-        <div class="pctbar">
+        <div class="pctbar{{ ' norank' if b.no_rank }}">
           <div class="pctrow">
             <span class="pctlab">{{ b.label }}{% if b.lower_better %}<span class="lowb" title="Lower is better">&darr;</span>{% endif %}
               {%- if b.blurb %}<span class="pctblurb">{{ b.blurb }}</span>{% endif %}</span>
             <span class="pctval">{{ b.display }}<small>{{ b.unit }}</small></span>
           </div>
+          {% if b.no_rank %}
+          {# No bar at all -- a filled track reads as "good", and this one has
+             no good. #}
+          <div class="pctnorank">shown, not ranked</div>
+          {% else %}
           <div class="pcttrack">
             <div class="pctfill" style="width:{{ b.pct }}%"></div>
             <div class="pctdot" style="left:{{ b.pct }}%"></div>
           </div>
           <div class="pctnum">{{ b.ord }}</div>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
@@ -494,57 +505,6 @@ td.strong{color:var(--white);font-weight:700}
         only {{ t.pool_n }} qualified){{ ', ' if not loop.last }}{% endfor %}.</p>
       {% endif %}
 
-      {# ---- The same season, broken out by the pitch he threw or saw. Types
-         are as CHARTED, not regrouped -- see percentiles.PITCH_LABEL. ---- #}
-      {% if bp %}
-      {% set gid = gs.side %}
-      <div class="bpwrap">
-        <div class="bphead">By pitch type</div>
-        <div class="pcttabs bptabs" data-g="{{ gid }}">
-          {% for s in bp %}
-          <button type="button" class="pcttab{{ ' on' if loop.first }}"
-                  data-g="{{ gid }}" data-bp="{{ loop.index0 }}">
-            {{ s.pitch }}<span class="pn">{{ s.n }}</span>
-          </button>
-          {% endfor %}
-        </div>
-        {% for s in bp %}
-        <div class="bppane" data-g="{{ gid }}" data-bp="{{ loop.index0 }}"
-             {% if not loop.first %}hidden{% endif %}>
-          {% if s.bars %}
-          <div class="pctgrid">
-            {% for b in s.bars %}
-            <div class="pctbar{{ ' norank' if b.no_rank }}">
-              <div class="pctrow">
-                <span class="pctlab">{{ b.label }}{% if b.lower_better %}<span class="lowb" title="Lower is better">&darr;</span>{% endif %}
-                  {%- if b.blurb %}<span class="pctblurb">{{ b.blurb }}</span>{% endif %}</span>
-                <span class="pctval">{{ b.display }}<small>{{ b.unit }}</small></span>
-              </div>
-              {% if b.no_rank %}
-              {# No direction, so no bar and no rank -- just the number. More
-                 swings at a pitch is an approach, not a virtue. #}
-              <div class="pctnorank">not ranked &mdash; no better or worse here</div>
-              {% else %}
-              <div class="pcttrack">
-                <div class="pctfill" style="width:{{ b.pct }}%"></div>
-                <div class="pctdot" style="left:{{ b.pct }}%"></div>
-              </div>
-              <div class="pctnum">{{ b.ord }}</div>
-              {% endif %}
-            </div>
-            {% endfor %}
-          </div>
-          {% endif %}
-          {% if s.thin %}
-          <p class="hint pctthin">Not ranked on this pitch:
-            {% for t in s.thin %}{{ t.label }} ({{ t.display }}{{ t.unit }} &mdash;
-            {% if t.pool_short %}only {{ t.pool_n }} teammates qualified
-            {%- else %}{{ t.n }} of {{ t.need }} needed{% endif %}){{ ', ' if not loop.last }}{% endfor %}.</p>
-          {% endif %}
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
     </div>
     {% endfor %}
 
@@ -1180,7 +1140,7 @@ function toggle(btnId, formId, cancelId){
 toggle('showGoal', 'goalForm', 'cancelGoal');
 toggle('showIv', 'ivForm', 'cancelIv');
 
-/* Bullpen strip: one pane per pitch type. */
+/* Percentile strip: one pane per pitch type. */
 (function(){
   const tabs = document.querySelectorAll('.pcttab[data-pt]');
   if(!tabs.length) return;
@@ -1190,64 +1150,6 @@ toggle('showIv', 'ivForm', 'cancelIv');
     document.querySelectorAll('.pctpane').forEach(
       p => { p.hidden = p.dataset.pt !== pt; });
   }));
-})();
-
-/* In-season by-pitch panes. Scoped by data-g so a two-way player's mound tabs
-   and plate tabs do not drive each other. */
-(function(){
-  document.querySelectorAll('.bptabs').forEach(group => {
-    const g = group.dataset.g;
-    const tabs = group.querySelectorAll('.pcttab[data-bp]');
-    tabs.forEach(t => t.addEventListener('click', () => {
-      tabs.forEach(x => x.classList.toggle('on', x === t));
-      document.querySelectorAll('.bppane[data-g="' + g + '"]').forEach(
-        p => { p.hidden = p.dataset.bp !== t.dataset.bp; });
-    }));
-  });
-})();
-
-/* The player link. Issuing is idempotent server-side -- clicking twice hands
-   back the same URL rather than invalidating the one already on his phone. */
-(function(){
-  const btn = document.getElementById('linkBtn');
-  if(!btn) return;
-  const box = document.getElementById('linkBox'),
-        url = document.getElementById('linkUrl'),
-        note = document.getElementById('linkNote'),
-        API = '/api/players/{{ p.player.id }}/link';
-
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    try{
-      const r = await fetch(API, {method:'POST'});
-      const d = await r.json();
-      if(!r.ok) throw new Error(d.error || 'Could not create the link.');
-      url.value = d.url; box.hidden = false;
-      note.textContent = 'Text this to ' + {{ p.player.name|tojson }}
-        + '. It shows his data only — no roster, no teammates, and nothing he '
-        + 'can change. Anyone holding the link can open it, so turn it off if '
-        + 'it goes astray.';
-      url.focus(); url.select();
-    }catch(e){
-      box.hidden = false; note.textContent = e.message;
-    }finally{ btn.disabled = false; }
-  });
-
-  document.getElementById('linkCopy').addEventListener('click', () => {
-    url.select();
-    navigator.clipboard.writeText(url.value)
-      .then(() => { note.textContent = 'Copied.'; })
-      .catch(() => { note.textContent = 'Press Ctrl+C to copy.'; });
-  });
-
-  document.getElementById('linkOff').addEventListener('click', async () => {
-    const r = await fetch(API, {method:'DELETE'});
-    const d = await r.json();
-    url.value = '';
-    note.textContent = r.ok
-      ? 'Turned off. Any link already sent to him has stopped working.'
-      : (d.error || 'Could not turn it off.');
-  });
 })();
 
 const val = id => (document.getElementById(id).value || '').trim();
