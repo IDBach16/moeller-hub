@@ -153,38 +153,117 @@ def by_pitch(engine, player_id):
 #
 #   pitching   FB velocity      true/noise 17.6  -- decisive; it is a
 #                                                   measurement, not a rate
-#              strike%          r = 0.68
+#              BB% of PA        r = 0.85 at 40+ PA, 0.67 at the 30 used
+#              chase-induced%   r = 0.75
 #              whiff%           r = 0.69
-#              chase-thrown%    r = 0.00         -- REJECTED, pure noise
+#              strike%          r = 0.68
+#              K% of PA         r = 0.67 at 40+ PA, 0.62 at the 30 used
+#              ahead-in-count%  r = 0.66
+#              heart%           r = 0.82  -- REJECTED on direction, not noise:
+#                                            middle-middle is both a strike and
+#                                            the most hittable pitch there is
+#              XBH allowed%     r = 0.55  -- REJECTED, marginal
+#              CSW%             r = 0.52  -- REJECTED, marginal
+#              zone%            r = 0.52  -- REJECTED, marginal
+#              first-pitch str% r = 0.29  -- REJECTED, noise
+#              hits allowed%    r = 0.21  -- REJECTED, noise
+#              called-strike%   r = -0.28 -- REJECTED, anti-correlated with
+#                                            itself; it is the umpire's stat
+#              chase-thrown%    r = 0.00  -- REJECTED, pure noise
 #   hitting    contact%         r = 0.89 at 60+ swings
-#              zone-swing%      r = 0.72 at 60+ zone pitches
-#              K% of PA         r = 0.70 at 40+ PA
+#              zone-contact%    r = 0.84 at 50+ in-zone swings
 #              XBH% of PA       r = 0.83 at 40+ PA
-#              chase%           r = 0.52         -- REJECTED, marginal
-#              BB% of PA        r = 0.12         -- REJECTED, noise
+#              reached-base%    r = 0.76 at 40+ PA
+#              zone-swing%      r = 0.72 at 60+ zone pitches
+#              two-strike ctc%  r = 0.71 at 40, 0.69 at the 25 used
+#              ahead-ct swing%  r = 0.70 at 50+ ahead-count pitches
+#              K% of PA         r = 0.70 at 40+ PA
+#              first-pitch sw%  r = 0.70  -- REJECTED on direction: hunting the
+#                                            first pitch is an approach, not a
+#                                            better or worse one
+#              in-play%         r = 0.53  -- REJECTED, marginal
+#              chase%           r = 0.52  -- REJECTED, marginal
+#              hit% of PA       r = 0.38  -- REJECTED, noise at this sample
+#              taken-strike%    r = 0.08  -- REJECTED, noise
+#              BB% of PA        r = 0.12  -- REJECTED, noise (the PITCHER's
+#                                            walk rate is reliable; the
+#                                            hitter's is not -- walks are
+#                                            mostly done to you, not by you)
+#
+# pitches per PA is absent for a different reason: odd/even splitting cannot
+# test it. The numerator splits across halves but each PA lands wholly in the
+# half holding its final pitch, which anti-correlates the halves by
+# construction (r = -0.51). Untestable is not the same as bad, but it does not
+# go on the page until there is a valid test for it.
+#
+# Three floors were relaxed below their first-measured value and RE-MEASURED
+# there rather than assumed: 2026 is a thinner charted season than 2025-26, and
+# at 40 PA only four pitchers qualified -- too few to rank against at all. They
+# were lowered to the point where at least six teammates clear them and the
+# correlation still holds (see the two figures above).
 #
 # The floors are those measured thresholds, not round numbers. Below one, the
 # metric is dropped for that player and named as thin rather than drawn faintly:
 # half a percentile is not half as useful, it is wrong.
 
 SWING_RESULTS = ("Strike Swing and Miss", "Strike Foul", "Strike In Play")
+_WHIFF = "Strike Swing and Miss"
+_HITS = ("1B", "2B", "3B", "HR")
 _XBH = ("2B", "3B", "HR")
+_WALKS = ("BB", "IBB")
+_IN_ZONE = ("Heart", "Shadow")
+_OUT_ZONE = ("Chase", "Waste")
 
-# (key, label, unit, higher_is_better, min_denominator)
+# (key, label, unit, higher_is_better, min_denominator, blurb)
+# The blurb is what the metric means in a coach's words -- these are not all
+# self-explanatory, and an unexplained percentile invites a wrong reading.
 GAME_PITCHING = [
-    ("fb_velo",    "Fastball velocity", "mph", True, 25),
-    ("strike_pct", "Strike%",           "%",   True, 50),
-    ("whiff_pct",  "Whiff%",            "%",   True, 40),
+    ("fb_velo",    "Fastball velocity", "mph", True,  25,
+     "average fastball in games"),
+    ("strike_pct", "Strike%",           "%",   True,  50,
+     "of all pitches thrown"),
+    ("bb_pct",     "Walk%",             "%",   False, 30,
+     "of batters faced"),
+    ("k_pct",      "Strikeout%",        "%",   True,  30,
+     "of batters faced"),
+    ("whiff_pct",  "Whiff%",            "%",   True,  40,
+     "swings he misses"),
+    # NOT "Chase%" -- that name reads as the share of pitches he THROWS out of
+    # the zone, which is the version that failed the screen (r = 0.00). This is
+    # the share of hitters' swings he draws at balls, which is deception.
+    ("chase_pct",  "Chases drawn%",     "%",   True,  40,
+     "of the balls he threw, hitters swung"),
+    ("ahead_pct",  "Ahead in count%",   "%",   True,  80,
+     "pitches thrown with more strikes than balls"),
 ]
 
-# swing% is deliberately absent: a percentile implies a direction, and swinging
-# more is neither good nor bad. zone-swing% has a direction -- go after strikes.
+# swing% and first-pitch swing% are deliberately absent although both are
+# reliable: a percentile implies a direction, and swinging more is an approach,
+# not a better one. Every metric below has a defensible right answer.
 GAME_HITTING = [
-    ("contact_pct", "Contact%",        "%", True,  60),
-    ("zswing_pct",  "Zone swing%",     "%", True,  60),
-    ("k_pct",       "Strikeout%",      "%", False, 40),
-    ("xbh_pct",     "Extra-base hit%", "%", True,  40),
+    ("contact_pct",  "Contact%",        "%", True,  60,
+     "of his swings"),
+    ("zcontact_pct", "Zone contact%",   "%", True,  50,
+     "on swings at strikes"),
+    ("k2_pct",       "2-strike contact%", "%", True, 25,
+     "with his back against the wall"),
+    ("zswing_pct",   "Zone swing%",     "%", True,  60,
+     "does he go after strikes"),
+    ("aswing_pct",   "Hitter-count swing%", "%", True, 50,
+     "attacks when he is ahead"),
+    ("k_pct",        "Strikeout%",      "%", False, 40,
+     "of his plate appearances"),
+    ("ob_pct",       "Reached base%",   "%", True,  40,
+     "hit, walk or hit-by-pitch"),
+    ("xbh_pct",      "Extra-base hit%", "%", True,  40,
+     "of his plate appearances"),
 ]
+
+# A per-player floor is not enough on its own. If only two teammates clear it,
+# the only percentiles that exist are 0th and 100th, and 87.5% two-strike
+# contact renders as "0th" against a single other player. A metric needs a real
+# field behind it or it is not ranked at all that season.
+MIN_POOL = 6
 
 _game_cache = {}
 _game_lock = threading.Lock()
@@ -223,34 +302,64 @@ def _game_table(year, side):
             fb = g[g["PitchType"].astype(str).str.contains("Fast", case=False,
                                                            na=False)]
             velo = fb["PitchVelo"].dropna()
+            pa = g[g["AtBatResult"].notna() & (g["AtBatResult"] != "")]
+            n_pa = int(len(pa))
+            outside = g[g["AttackZone"].isin(_OUT_ZONE)]
             out[str(name)] = {
                 "fb_velo": round(float(velo.mean()), 1) if len(velo) else None,
                 "fb_velo_n": int(len(velo)),
                 "strike_pct": _rate(int((g["PitchResult"] != "Ball").sum()), len(g)),
                 "strike_pct_n": int(len(g)),
                 "whiff_pct": _rate(
-                    int((g["PitchResult"] == "Strike Swing and Miss").sum()),
-                    int(sw.sum())),
+                    int((g["PitchResult"] == _WHIFF).sum()), int(sw.sum())),
                 "whiff_pct_n": int(sw.sum()),
+                "bb_pct": _rate(int(pa["AtBatResult"].isin(_WALKS).sum()), n_pa),
+                "bb_pct_n": n_pa,
+                "k_pct": _rate(int((pa["AtBatResult"] == "Strike Out").sum()), n_pa),
+                "k_pct_n": n_pa,
+                # Swings he drew at balls -- deception, not location.
+                "chase_pct": _rate(
+                    int(outside["PitchResult"].isin(SWING_RESULTS).sum()),
+                    int(len(outside))),
+                "chase_pct_n": int(len(outside)),
+                "ahead_pct": _rate(int((g["Strikes"] > g["Balls"]).sum()), len(g)),
+                "ahead_pct_n": int(len(g)),
                 "total": int(len(g)),
             }
     else:
         d = df[df["BatterTeam"] == "Moeller"]
         for name, g in d.groupby("Batter"):
             n_sw = int(g["PitchResult"].isin(SWING_RESULTS).sum())
-            zone = g[g["AttackZone"].isin(["Heart", "Shadow"])]
+            zone = g[g["AttackZone"].isin(_IN_ZONE)]
+            z_sw = int(zone["PitchResult"].isin(SWING_RESULTS).sum())
+            two = g[g["Strikes"] == 2]
+            t_sw = int(two["PitchResult"].isin(SWING_RESULTS).sum())
+            ahead = g[g["Balls"] > g["Strikes"]]
             pa = g[g["AtBatResult"].notna() & (g["AtBatResult"] != "")]
             n_pa = int(len(pa))
             out[str(name)] = {
                 "contact_pct": _rate(
-                    n_sw - int((g["PitchResult"] == "Strike Swing and Miss").sum()),
-                    n_sw),
+                    n_sw - int((g["PitchResult"] == _WHIFF).sum()), n_sw),
                 "contact_pct_n": n_sw,
-                "zswing_pct": _rate(
-                    int(zone["PitchResult"].isin(SWING_RESULTS).sum()), int(len(zone))),
+                # Contact on pitches he SHOULD hit, separate from chases.
+                "zcontact_pct": _rate(
+                    z_sw - int((zone["PitchResult"] == _WHIFF).sum()), z_sw),
+                "zcontact_pct_n": z_sw,
+                "k2_pct": _rate(
+                    t_sw - int((two["PitchResult"] == _WHIFF).sum()), t_sw),
+                "k2_pct_n": t_sw,
+                "zswing_pct": _rate(z_sw, int(len(zone))),
                 "zswing_pct_n": int(len(zone)),
+                "aswing_pct": _rate(
+                    int(ahead["PitchResult"].isin(SWING_RESULTS).sum()),
+                    int(len(ahead))),
+                "aswing_pct_n": int(len(ahead)),
                 "k_pct": _rate(int((pa["AtBatResult"] == "Strike Out").sum()), n_pa),
                 "k_pct_n": n_pa,
+                "ob_pct": _rate(
+                    int(pa["AtBatResult"].isin(_HITS + _WALKS + ("HBP",)).sum()),
+                    n_pa),
+                "ob_pct_n": n_pa,
                 "xbh_pct": _rate(int(pa["AtBatResult"].isin(_XBH).sum()), n_pa),
                 "xbh_pct_n": n_pa,
                 "total": int(len(g)),
@@ -290,7 +399,7 @@ def game_strip(name, side, year=None):
 
     spec = GAME_PITCHING if side == "pitching" else GAME_HITTING
     bars, thin = [], []
-    for key, label, unit, higher_better, min_n in spec:
+    for key, label, unit, higher_better, min_n, blurb in spec:
         n = mine.get(key + "_n") or 0
         val = mine.get(key)
         if val is None:
@@ -303,12 +412,20 @@ def game_strip(name, side, year=None):
         # the bottom of the scale.
         vals = [r[key] for r in table.values()
                 if r.get(key) is not None and (r.get(key + "_n") or 0) >= min_n]
+        if len(vals) < MIN_POOL:
+            # Too few teammates qualified to make a percentile mean anything.
+            # He is not short of sample -- the field is -- so say that instead
+            # of quoting him a rank out of two.
+            thin.append({"label": label, "value": round(val, 1), "unit": unit,
+                         "n": n, "need": min_n, "pool_n": len(vals),
+                         "pool_short": True})
+            continue
         pct = _pct(vals, val)
         if pct is None:
             continue
         rank = pct if higher_better else 100 - pct
         bars.append({"label": label, "value": round(val, 1), "unit": unit,
-                     "pct": rank, "ord": ordinal(rank),
+                     "pct": rank, "ord": ordinal(rank), "blurb": blurb,
                      "n": n, "pool_n": len(vals),
                      "lower_better": not higher_better})
 

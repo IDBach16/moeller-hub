@@ -67,6 +67,10 @@ a.pctyear:hover{color:var(--gold-light);background:rgba(255,255,255,.05)}
    rate is otherwise indistinguishable from a high strikeout rate. */
 .lowb{margin-left:.3rem;font-size:.72rem;color:rgba(255,255,255,.35)}
 .pctthin{margin-top:.7rem}
+/* "of batters faced", "on swings at strikes" -- half these metrics are not
+   self-explanatory, and an unexplained percentile invites a wrong reading. */
+.pctblurb{display:block;font-size:.68rem;color:rgba(255,255,255,.33);
+  line-height:1.3;margin-top:.05rem}
 
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:.9rem}
 .tile{
@@ -451,7 +455,8 @@ td.strong{color:var(--white);font-weight:700}
         {% for b in gs.bars %}
         <div class="pctbar">
           <div class="pctrow">
-            <span class="pctlab">{{ b.label }}{% if b.lower_better %}<span class="lowb" title="Lower is better">&darr;</span>{% endif %}</span>
+            <span class="pctlab">{{ b.label }}{% if b.lower_better %}<span class="lowb" title="Lower is better">&darr;</span>{% endif %}
+              {%- if b.blurb %}<span class="pctblurb">{{ b.blurb }}</span>{% endif %}</span>
             <span class="pctval">{{ b.value }}<small>{{ b.unit }}</small></span>
           </div>
           <div class="pcttrack">
@@ -463,10 +468,20 @@ td.strong{color:var(--white);font-weight:700}
         {% endfor %}
       </div>
       {% endif %}
-      {% if gs.thin %}
-      <p class="hint pctthin">Not enough {{ gs.year }} sample to rank:
-        {% for t in gs.thin %}{{ t.label }} ({{ t.value }}{{ t.unit }}, {{ t.n }} of
-        {{ t.need }} needed){{ ', ' if not loop.last }}{% endfor %}.</p>
+      {# Two different reasons a metric is missing, and they mean opposite
+         things about the player: his sample is short, or the FIELD is. #}
+      {% set short_him = gs.thin|rejectattr('pool_short')|list %}
+      {% set short_field = gs.thin|selectattr('pool_short')|list %}
+      {% if short_him %}
+      <p class="hint pctthin">Not enough of his own {{ gs.year }} sample to rank:
+        {% for t in short_him %}{{ t.label }} ({{ t.value }}{{ t.unit }},
+        {{ t.n }} of {{ t.need }} needed){{ ', ' if not loop.last }}{% endfor %}.</p>
+      {% endif %}
+      {% if short_field %}
+      <p class="hint pctthin">He qualifies, but too few teammates did in
+        {{ gs.year }} for a ranking to mean anything:
+        {% for t in short_field %}{{ t.label }} ({{ t.value }}{{ t.unit }},
+        only {{ t.pool_n }} qualified){{ ', ' if not loop.last }}{% endfor %}.</p>
       {% endif %}
     </div>
     {% endfor %}

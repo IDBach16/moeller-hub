@@ -54,6 +54,9 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
 /* Without this, an 88th percentile for a LOW strikeout rate looks identical to
    an 88th percentile for a high one. */
 .lowb{margin-left:.35rem;font-size:.62rem;color:rgba(255,255,255,.35)}
+/* Half these are not self-explanatory to a sixteen-year-old. Say what the
+   denominator is rather than trusting him to guess. */
+.blurb{display:block;font-size:.68rem;color:rgba(255,255,255,.34);margin-top:.05rem}
 .track{position:relative;height:8px;border-radius:99px;margin-top:.45rem;
   background:rgba(255,255,255,.08)}
 .fill{position:absolute;inset:0 auto 0 0;border-radius:99px;
@@ -109,7 +112,8 @@ h1{font-size:1.75rem;font-weight:800;letter-spacing:.01em;line-height:1.15}
     <div class="bar">
       <div class="top">
         <span class="lab">{{ b.label }}<span class="pctnum">{{ b.ord }}</span>
-          {%- if b.lower_better %}<span class="lowb">lower is better</span>{% endif %}</span>
+          {%- if b.lower_better %}<span class="lowb">lower is better</span>{% endif %}
+          {%- if b.blurb %}<span class="blurb">{{ b.blurb }}</span>{% endif %}</span>
         <span class="val num">{{ b.value }}<small>{{ b.unit }}</small></span>
       </div>
       <div class="track">

@@ -18,7 +18,7 @@ def ok(label, cond, detail=""):
 
 
 def _floors(spec):
-    return {label: min_n for _k, label, _u, _h, min_n in spec}
+    return {label: min_n for _k, label, _u, _h, min_n, _b in spec}
 
 
 def game():
@@ -83,28 +83,40 @@ def game():
         if g and g["thin"]:
             thin_seen = True
             ok("a thin sample is named, never ranked (%s)" % name,
-               all(t["n"] < t["need"] for t in g["thin"]))
+               all(t["n"] < t["need"] or t.get("pool_short")
+                   for t in g["thin"]))
             hfloors = _floors(percentiles.GAME_HITTING)
             ok("and it is not silently on the strip too",
                not any(b["label"] == t["label"]
                        for b in g["bars"] for t in g["thin"]))
             ok("the shortfall it reports is the real floor",
                all(t["need"] == hfloors[t["label"]] for t in g["thin"]))
+            ok("nothing is ranked against fewer than MIN_POOL teammates",
+               all(b["pool_n"] >= percentiles.MIN_POOL for b in g["bars"]),
+               [(b["label"], b["pool_n"]) for b in g["bars"]])
             break
     if not thin_seen:
         print("  [skip] no thin-sample hitter in this data")
 
-    print("rejected metrics stay rejected")
-    hl = [l for _k, l, *_ in percentiles.GAME_HITTING]
-    pl = [l for _k, l, *_ in percentiles.GAME_PITCHING]
-    ok("chase% is off the hitting strip (r = 0.52, marginal)",
-       not any("hase" in l for l in hl), hl)
-    ok("walk rate is off the hitting strip (r = 0.12, noise)",
-       not any("alk" in l or l.startswith("BB") for l in hl), hl)
-    ok("swing% is off it too -- a percentile implies a direction",
-       "Swing%" not in hl, hl)
-    ok("chase-thrown% is off the pitching strip (r = 0.00, noise)",
-       not any("hase" in l for l in pl), pl)
+    print("only qualified metrics are on the strips")
+    # Checked as an exact key set rather than by matching label text: the
+    # rejected "chase-thrown%" and the kept "chases drawn%" are different
+    # metrics whose names look alike, and a substring test confuses them.
+    hk = {k for k, *_ in percentiles.GAME_HITTING}
+    pk = {k for k, *_ in percentiles.GAME_PITCHING}
+    ok("the pitching strip is exactly the qualified set",
+       pk == {"fb_velo", "strike_pct", "bb_pct", "k_pct", "whiff_pct",
+              "chase_pct", "ahead_pct"}, sorted(pk))
+    ok("the hitting strip is exactly the qualified set",
+       hk == {"contact_pct", "zcontact_pct", "k2_pct", "zswing_pct",
+              "aswing_pct", "k_pct", "ob_pct", "xbh_pct"}, sorted(hk))
+    ok("the hitter's own walk rate is absent (r = 0.12 -- walks are done TO "
+       "a hitter, not by him)", "bb_pct" not in hk)
+    ok("no direction-free metric is ranked (swing%, first-pitch swing%)",
+       not ({"swing_pct", "fpswing_pct", "heart_pct"} & (hk | pk)))
+    ok("every metric carries a plain-English blurb",
+       all(b and len(b) > 5 for *_r, b in
+           percentiles.GAME_PITCHING + percentiles.GAME_HITTING))
 
 
 def main():
