@@ -183,6 +183,20 @@ def by_pitch(engine, player_id):
 #              called-strike%   r = -0.28 -- REJECTED, anti-correlated with
 #                                            itself; it is the umpire's stat
 #              chase-thrown%    r = 0.00  -- REJECTED, pure noise
+# TWO BARS ARE PROVISIONAL. The reliability figures below come from splitting
+# a player's pitches odd/even. A later, harder test -- odd GAMES against even
+# ones, so each half faces different opponents -- disagrees on two of them:
+#
+#     zone-swing%     0.72 by pitch,  0.51 by game
+#     reached-base%   0.76 by pitch,  0.39 by game
+#
+# The game split is the more honest measure of whether a number predicts the
+# same player next week, because interleaving pitches inside the same games
+# lets opponent quality cancel out. By the >= 0.60 rule both would drop to
+# unranked. Ian's call on 2026-08-26 was to keep them ranked for now; at 19-21
+# players either estimate carries a wide interval. Re-measure before trusting
+# either at face value.
+#
 #   hitting    contact%         r = 0.89 at 60+ swings
 #              zone-contact%    r = 0.84 at 50+ in-zone swings
 #              XBH% of PA       r = 0.83 at 40+ PA
@@ -281,12 +295,17 @@ GAME_HITTING = [
      "on swings at strikes"),
     ("k2_pct",       "2-strike contact%", "%", True, 25,
      "with his back against the wall"),
+    # KEPT RANKED ON IAN'S CALL, 2026-08-26, pending a re-measure. The
+    # game-date split scores this 0.51, under the 0.60 bar used everywhere
+    # else; the older pitch split said 0.72. See the note above GAME_HITTING.
     ("zswing_pct",   "Zone swing%",     "%", True,  60,
      "does he go after strikes"),
     ("aswing_pct",   "Hitter-count swing%", "%", True, 50,
      "attacks when he is ahead"),
     ("k_pct",        "Strikeout%",      "%", False, 20,
      "of his plate appearances"),
+    # Same call, same date: 0.39 on the game-date split against 0.76 on the
+    # pitch split. The wider gap of the two, so this is the first to revisit.
     ("ob_pct",       "Reached base%",   "%", True,  40,
      "hit, walk or hit-by-pitch"),
     ("xbh_pct",      "Extra-base hit%", "%", True,  40,
