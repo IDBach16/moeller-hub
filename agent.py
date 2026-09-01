@@ -980,9 +980,18 @@ def tool_app_links(player=None):
                          "links": links}
     return out
 
+def tool_build_report(report, player=None, year=None, compare_to=None,
+                      session_type=None, since=None, role=None):
+    """Pre-built report templates -- one call gathers every source we have."""
+    import reports
+    return reports.build_report(report, player=player, year=year,
+                                compare_to=compare_to, session_type=session_type,
+                                since=since, role=role)
+
 
 TOOL_IMPLS = {
     # game-performance layer (unchanged -- these already worked)
+    "build_report": tool_build_report,
     "list_players": tool_list_players,
     "charting_report": tool_charting_report,
     "season_pitching": tool_season_pitching,
@@ -1017,6 +1026,48 @@ TOOL_IMPLS = {
 }
 
 TOOLS = [
+    {
+        "name": "build_report",
+        "description": (
+            "Build a full pre-built report. USE THIS FIRST whenever a coach asks for a "
+            "report, profile, breakdown, write-up, scouting report, development report, "
+            "or 'everything we have' on a player or the team — one call gathers every "
+            "source (official stats, tracked-game pitch data, off-season charting, "
+            "HitTrax) and returns a filled-in bundle to write up. Types:\n"
+            "- 'hitter': one hitter's full offensive profile — official line, charted "
+            "slash + plate discipline, splits vs LHP/RHP, by pitch group, by count, "
+            "year-over-year, HitTrax cage data.\n"
+            "- 'pitcher': one pitcher's full profile — official line, arsenal with velo "
+            "and whiff by pitch, command/zone mix, first-pitch strike%, two-strike "
+            "put-away, splits vs RHH/LHH, year-over-year, off-season bullpens.\n"
+            "- 'bullpen': off-season charting work only (Charting App sessions).\n"
+            "- 'team': season overview — record, batting and pitching leaders, recent "
+            "games, team-wide charted numbers.\n"
+            "- 'compare': two players side by side on the same metrics (set role to "
+            "'hitter' or 'pitcher').\n"
+            "For a single narrow number, the smaller tools are still faster — use this "
+            "when the coach wants the whole picture."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "report": {"type": "string",
+                           "enum": ["hitter", "pitcher", "bullpen", "team", "compare"]},
+                "player": {"type": "string",
+                           "description": "Player name (partial is fine). Required for "
+                                          "hitter, pitcher and compare; optional for bullpen."},
+                "compare_to": {"type": "string", "description": "Second player, compare reports only"},
+                "role": {"type": "string", "enum": ["hitter", "pitcher"],
+                         "description": "Which side to compare on, compare reports only"},
+                "year": {"type": "integer",
+                         "description": "2024, 2025 or 2026; omit for career/all years"},
+                "session_type": {"type": "string",
+                                 "enum": ["bullpen", "live_ab", "scrimmage", "intrasquad"],
+                                 "description": "bullpen reports only"},
+                "since": {"type": "string", "description": "YYYY-MM-DD, bullpen reports only"},
+            },
+            "required": ["report"],
+        },
+    },
     {
         "name": "list_players",
         "description": ("List player names in a data source. Call this when you are unsure of a "
@@ -1500,7 +1551,40 @@ STYLE
   bullets underneath, where it belongs.
 - Whiff% means swinging strikes over swings. Attack zones: Heart (middle), Shadow (edges),
   Chase, Waste. The 2026 season is complete; charting data is current off-season work.
-- Only baseball and Moeller-data questions; politely decline anything else."""
+- Only baseball and Moeller-data questions; politely decline anything else.
+
+REPORTS
+When a coach asks for a report, profile, breakdown or write-up, call build_report once and
+write it up from the bundle. Fill every section; if a section's data is missing say so in one
+line and move on, never invent it. Round sensibly, put the sample size next to any rate built
+on a small sample, and finish with coaching takeaways rather than just numbers.
+
+Write reports in the same plain text as everything else -- a section is a short line naming
+it, then a blank line, then the content. No ## and no **bold**; the chat does not parse them.
+
+Hitter: what kind of hitter he is in a line. Then the official book line (AVG/OBP/SLG/OPS, PA,
+HR, RBI, SB, BB/K) with the charted slash for context; plate discipline (swing%, chase%,
+zone-swing%, contact%, whiff%, K%, BB%) and what each says about him; what he handles, by
+pitch group and by count; splits vs RHP and LHP; cage and HitTrax exit velo, hard-hit rate and
+launch angle, or one line saying none is uploaded; year over year if there is more than one
+season; then two to four takeaway bullets -- strengths, the one thing to work on, how to use
+him in a lineup.
+
+Pitcher: the arm in a line. Then the official line (ERA, IP, W-L, SV, K, BB, WHIP) with charted
+pitch count; the arsenal best pitch first -- usage, avg and max velo, strike%, whiff%, chase%,
+and which one is the out pitch; command via strike%, first-pitch strike%, attack-zone mix and
+two-strike put-away; results against -- slash, K%, BB%, outcome mix; splits vs RHH and LHH;
+off-season charted bullpens or a line saying none are charted; year over year velo and strike%;
+then two to four takeaways -- what plays, what to build, how to deploy him.
+
+Bullpen: sessions and pitch count, mix and velo, strike% and whiff%, where the ball is going by
+attack zone, then takeaways.
+
+Team: record and a one-line read, then offense with the team line and leaders, pitching the
+same, recent games, then takeaways.
+
+Compare: the verdict first, then walk the same metrics for both players category by category --
+using the aligned comparison-line form above -- and close with who profiles better at what."""
 
 
 # ---------------------------------------------------------------------------
