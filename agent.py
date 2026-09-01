@@ -551,8 +551,18 @@ def tool_team_stats(kind):
     return data
 
 
+def tool_build_report(report, player=None, year=None, compare_to=None,
+                      session_type=None, since=None, role=None):
+    """Pre-built report templates -- one call gathers every source we have."""
+    import reports
+    return reports.build_report(report, player=player, year=year,
+                                compare_to=compare_to, session_type=session_type,
+                                since=since, role=role)
+
+
 TOOL_IMPLS = {
     # game-performance layer (unchanged -- these already worked)
+    "build_report": tool_build_report,
     "list_players": tool_list_players,
     "charting_report": tool_charting_report,
     "season_pitching": tool_season_pitching,
@@ -572,6 +582,48 @@ TOOL_IMPLS = {
 }
 
 TOOLS = [
+    {
+        "name": "build_report",
+        "description": (
+            "Build a full pre-built report. USE THIS FIRST whenever a coach asks for a "
+            "report, profile, breakdown, write-up, scouting report, development report, "
+            "or 'everything we have' on a player or the team — one call gathers every "
+            "source (official stats, tracked-game pitch data, off-season charting, "
+            "HitTrax) and returns a filled-in bundle to write up. Types:\n"
+            "- 'hitter': one hitter's full offensive profile — official line, charted "
+            "slash + plate discipline, splits vs LHP/RHP, by pitch group, by count, "
+            "year-over-year, HitTrax cage data.\n"
+            "- 'pitcher': one pitcher's full profile — official line, arsenal with velo "
+            "and whiff by pitch, command/zone mix, first-pitch strike%, two-strike "
+            "put-away, splits vs RHH/LHH, year-over-year, off-season bullpens.\n"
+            "- 'bullpen': off-season charting work only (Charting App sessions).\n"
+            "- 'team': season overview — record, batting and pitching leaders, recent "
+            "games, team-wide charted numbers.\n"
+            "- 'compare': two players side by side on the same metrics (set role to "
+            "'hitter' or 'pitcher').\n"
+            "For a single narrow number, the smaller tools are still faster — use this "
+            "when the coach wants the whole picture."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "report": {"type": "string",
+                           "enum": ["hitter", "pitcher", "bullpen", "team", "compare"]},
+                "player": {"type": "string",
+                           "description": "Player name (partial is fine). Required for "
+                                          "hitter, pitcher and compare; optional for bullpen."},
+                "compare_to": {"type": "string", "description": "Second player, compare reports only"},
+                "role": {"type": "string", "enum": ["hitter", "pitcher"],
+                         "description": "Which side to compare on, compare reports only"},
+                "year": {"type": "integer",
+                         "description": "2024, 2025 or 2026; omit for career/all years"},
+                "session_type": {"type": "string",
+                                 "enum": ["bullpen", "live_ab", "scrimmage", "intrasquad"],
+                                 "description": "bullpen reports only"},
+                "since": {"type": "string", "description": "YYYY-MM-DD, bullpen reports only"},
+            },
+            "required": ["report"],
+        },
+    },
     {
         "name": "list_players",
         "description": ("List player names in a data source. Call this when you are unsure of a "
@@ -830,11 +882,69 @@ STYLE
 
 - Lead with the answer and the key numbers. A couple of short paragraphs or a few plain
   lines is right. You're talking to coaches — baseball shorthand is fine.
-- Plain text ONLY. The chat window renders your reply literally, so never use markdown:
-  no **bold**, no ## headers, no tables, no bullet asterisks. Dashes and line breaks are fine.
 - Whiff% means swinging strikes over swings. Attack zones: Heart (middle), Shadow (edges),
   Chase, Waste. The 2026 season is complete; charting data is current off-season work.
-- Only baseball and Moeller-data questions; politely decline anything else."""
+- Only baseball and Moeller-data questions; politely decline anything else.
+
+FORMATTING
+The chat window renders a small markdown subset. You may use: ## Section headers, **bold**, \
+"- " bullets, and --- as a divider. Nothing else — no tables, no numbered-list markup, no links, \
+no code fences. For a short answer, skip the headers entirely and just talk.
+
+REPORTS
+When a coach asks for a report, profile, breakdown or write-up, call build_report once and write it \
+up in the matching template below. Fill every section from the bundle; if a section's data is missing, \
+say so in one line and move on — never invent it. Round sensibly, put the sample size next to any rate \
+built on a small sample, and finish with coaching takeaways, not just numbers.
+
+Hitter report template:
+## <Name> — Hitter Report (<scope>)
+One-line summary: what kind of hitter he is, from the numbers.
+## The Line
+Official 2026 book line (AVG/OBP/SLG/OPS, PA, HR, RBI, SB, BB/K) plus the charted slash for context.
+## Plate Discipline
+Swing%, chase%, zone-swing%, contact%, whiff%, K% and BB% — say what each one means for him.
+## What He Handles
+Fastball vs breaking vs offspeed, and the count splits (ahead / even / behind / two strikes).
+## Splits
+vs RHP and vs LHP.
+## Cage / HitTrax
+Exit velo, hard-hit rate, launch angle — or one line saying it hasn't been uploaded.
+## Trend
+Year over year, if there's more than one season.
+## Takeaways
+Two to four bullets: strengths, the one thing to work on, how to use him in a lineup.
+
+Pitcher report template:
+## <Name> — Pitcher Report (<scope>)
+One-line summary of the arm.
+## The Line
+Official 2026 book line (ERA, IP, W-L, SV, K, BB, WHIP) plus charted pitch count.
+## Arsenal
+Each pitch: usage, avg/max velo, strike%, whiff%, chase% — best pitch first, and say which one is the out pitch.
+## Command
+Strike%, first-pitch strike%, attack-zone mix, two-strike put-away.
+## Results Against
+Slash against, K% and BB%, outcome mix.
+## Splits
+vs RHH and vs LHH.
+## Off-Season Work
+Charted bullpens — or one line saying none are charted yet.
+## Trend
+Year over year velo and strike%, if there's more than one season.
+## Takeaways
+Two to four bullets: what plays, what to build, how to deploy him.
+
+Bullpen report: sessions and pitch count, mix and velo, strike%/whiff%, where the ball is going by \
+attack zone, then takeaways.
+
+Team report:
+## Moeller Baseball — Team Report (<scope>)
+Record and a one-line read on the season. Then ## Offense (team line + leaders), ## Pitching \
+(team line + leaders), ## Recent Games, ## Takeaways.
+
+Compare report: a short verdict first, then walk the same metrics for both players side by side under \
+## headers by category, then ## Verdict — who profiles better at what, and why."""
 
 
 # ---------------------------------------------------------------------------

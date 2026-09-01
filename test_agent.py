@@ -223,7 +223,14 @@ for t in agent.TOOLS:
     props = t["input_schema"].get("properties", {})
     check(f"  {t['name']} required fields exist in properties",
           all(r in props for r in req), str(req))
-check("the system prompt forbids markdown", "no **bold**" in agent.SYSTEM)
+check("the system prompt allows the markdown subset the chat renders",
+      "FORMATTING" in agent.SYSTEM and "## Section headers" in agent.SYSTEM)
+check("the system prompt still rules out what the renderer cannot draw",
+      "no tables" in agent.SYSTEM and "no code fences" in agent.SYSTEM)
+check("the system prompt carries the report templates",
+      "REPORTS" in agent.SYSTEM and "Hitter report template:" in agent.SYSTEM
+      and "Pitcher report template:" in agent.SYSTEM)
+check("build_report is wired up", "build_report" in agent.TOOL_IMPLS)
 check("the system prompt warns against claiming cause",
       "not proof of a cause" in agent.SYSTEM or "do not say it caused" in agent.SYSTEM)
 check("the system prompt explains that empty != failure",

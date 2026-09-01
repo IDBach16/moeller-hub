@@ -166,6 +166,16 @@ def create_app():
         except Exception as e:
             return jsonify({"error": f"The assistant hit a snag: {e}"}), 500
 
+    @app.route("/api/report-options")
+    def api_report_options():
+        """Rosters and seasons for the Quick Reports pickers. Loaded on first use --
+        it parses the season CSV, so page loads don't pay for it."""
+        try:
+            import reports
+            return jsonify(reports.report_options())
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     # -----------------------------------------------------------------------
     # Git push endpoint
     # -----------------------------------------------------------------------
