@@ -114,6 +114,13 @@ def create_app():
     # a dead end. Guarded and idempotent; see seed.maybe_seed. Failure here must
     # never stop the hub serving, so the tool cards still work regardless.
     try:
+        # Migrations first: create_all makes missing tables but never adds
+        # columns to existing ones, so a schema change would otherwise never
+        # reach a database that already exists. See migrate.py.
+        import migrate
+        ok, msg = migrate.upgrade_to_head()
+        print(f"[startup] migrate: {msg}", flush=True)
+
         import seed
         seed.maybe_seed(db.get_engine())
     except Exception as e:                                   # pragma: no cover
