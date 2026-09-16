@@ -206,10 +206,57 @@ this — estimating from drill means recovers 2.25 mph against a built-in 6.0.
 **Per-drill numbers are still on the page.** The status tiles and the session log
 are both per drill, because there a hitter is compared to himself.
 
+### Two pools, never merged
+
+Each hitter's page carries **two separate panels**, and they answer different questions:
+
+| panel | question | population |
+|---|---|---|
+| **In the cage — Blast** | how does he compare to the guys next to him? | Moeller, drill-adjusted |
+| **Against Blast's benchmarks** | is he where Blast says a hitter at his level should be? | the vendor's published bands |
+
+A single blended number would answer neither. `percentiles.blast_benchmark()`
+drives the second; `metrics.BLAST_BENCHMARKS` holds the table.
+
+Three rules in that second panel, all mutation-tested:
+
+- **The band follows his level.** Varsity gets the varsity column; **a freshman
+  gets the JV column, not Middle School** — that one is for younger players. An
+  unknown level falls back to JV, the more forgiving band: better to understate a
+  shortfall than invent one against a player whose level we don't actually know.
+- **What a miss MEANS depends on the metric, not which side it fell.** Below the
+  band is a shortfall on bat speed and *better than the band* on time to contact.
+  Target-band metrics are never "short", only "outside".
+- **Averaged over ALL his swings, tagged and untagged** — unlike everywhere else
+  here — because Blast's bands aren't drill-specific either. That makes this
+  figure drill-mix dependent, so a hitter who is >= 50% tee gets a caveat saying
+  his numbers read low for that reason and not his swing.
+
+Two caveats are surfaced *in the UI*, not buried in a comment:
+
+- **`BLAST_WIDE`** — attack angle (0–15°) and vertical bat angle (−10 to −40°) are
+  wide enough that all 19 measured hitters clear them. The page says passing is
+  not evidence of much, so nobody reads 19/19 as good news.
+- **`BLAST_PROVISIONAL`** — Blast prints the JV bat-speed band as **"55–56 mph"**,
+  not a credible one-mph range. JV duplicates their "Amateur All Levels" column
+  exactly for hand speed and power, so that column's 55–65 is used and the bar is
+  marked provisional.
+
+`blastconnect.com` now redirects to **WIN Reality** — Blast has been absorbed,
+which is the likely reason their blog (varsity 57–71, JV 53–67) disagrees with
+the product page (60–70) this table is taken from. **Re-read the table before the
+spring**, and if it has moved, `BLAST_BENCHMARKS` is the one place to change.
+
+Blast's **Rotation Score** is on their table and absent here on purpose: it is a
+Blast composite the export does not carry, and rotational acceleration is a
+different measurement, not a stand-in for it.
+
 ### The pool is Moeller, not "Blast standards"
 
-Blast publishes benchmark tables by level; they are **not in this repo**, and
-inventing plausible ones would be worse than having none — a kid told he is
+**They are in the repo now** (`metrics.BLAST_BENCHMARKS`, transcribed
+2026-09-16), and they sit in their own panel rather than replacing the teammate
+ranking. The rule that got them there still stands: a benchmark is used only when
+it is sourced. Inventing plausible ones would be worse than having none — a kid told he is
 "below the high-school standard" against an unsourced number is being told
 something untrue with authority. Real benchmarks go in as a **second, labelled
 pool**, never a replacement. Ian's own 2024 Blast Shiny app ranked within Moeller

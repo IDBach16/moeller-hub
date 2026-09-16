@@ -519,6 +519,92 @@ check("with nobody spanning two drills the offset is unidentified",
 check("...and MIN_LINKED is what stops it being applied anyway",
       percentiles.MIN_LINKED >= 2)
 
+
+# ===========================================================================
+section("Blast's own benchmarks -- the second pool")
+# ===========================================================================
+# These bands come from the vendor, not from us, so the checks are about
+# applying them honestly: the right band for the level, the right MEANING for a
+# miss, and the two caveats surfaced rather than buried.
+
+check("a varsity hitter is read against the varsity band, not JV",
+      metrics.blast_band("bat_speed", "varsity") == (60.0, 70.0)
+      and metrics.blast_band("bat_speed", "jv") == (55.0, 65.0))
+check("a freshman gets the JV band, not Middle School",
+      metrics.blast_band("bat_speed", "freshman")
+      == metrics.blast_band("bat_speed", "jv"),
+      "a high-school freshman is a JV-level hitter; Middle School is younger")
+check("an unknown level falls back to JV, the more forgiving band",
+      metrics.blast_band("bat_speed", None) == metrics.blast_band("bat_speed", "jv"),
+      "we would rather understate a shortfall than invent one")
+check("level-independent bands ignore the level entirely",
+      metrics.blast_band("on_plane_efficiency", "varsity")
+      == metrics.blast_band("on_plane_efficiency", "freshman") == (65.0, 85.0))
+check("a metric Blast publishes no band for returns None, not a guess",
+      metrics.blast_band("rotational_acceleration", "varsity") is None,
+      "Blast's Rotation Score is a different measurement and must not be "
+      "approximated with rotational acceleration")
+check("the two uninformative bands are flagged as wide",
+      metrics.BLAST_WIDE == {"attack_angle", "vertical_bat_angle"},
+      "every Moeller hitter clears both; passing is not evidence")
+check("the misprinted JV bat-speed band is flagged provisional",
+      ("bat_speed", "jv") in metrics.BLAST_PROVISIONAL
+      and ("bat_speed", "freshman") in metrics.BLAST_PROVISIONAL)
+
+# --- a hitter placed on purpose, to check the verdicts mean what they say ---
+with ENGINE.begin() as conn:
+    conn.execute(insert(db.players).values(
+        id=200, slug="bench-guy", first_name="Bench", last_name="Guy"))
+    conn.execute(insert(db.player_seasons).values(
+        player_id=200, season=2026, level="varsity"))
+
+bench = []
+for d in range(2):
+    when = date(2027, 3, 1) + timedelta(days=d * 7)
+    for _ in range(20):
+        # Slow bat (varsity band 60-70) and a quick time to contact.
+        r = swing("Bench", "Guy", 810001, when, "tee", RNG.gauss(52, 1.0))
+        r["Time to Contact (s)"] = round(RNG.gauss(0.130, 0.004), 3)
+        bench.append(r)
+bid, _ = ingest.store(ENGINE, "blast", "bench.csv", as_csv(bench),
+                      side="hitting", session_type="cage")
+ingest.commit(ENGINE, bid)
+percentiles.clear_blast_cache()
+
+bm = percentiles.blast_benchmark(ENGINE, 200)
+bars = {b["key"]: b for b in (bm["bars"] if bm else [])}
+check("the panel reports the level it used", bm and bm["level"] == "varsity"
+      and "Varsity" in bm["level_label"], str(bm and bm.get("level_label")))
+check("a slow bat against the varsity band reads as SHORT",
+      bars.get("bat_speed", {}).get("tone") == "short",
+      str(bars.get("bat_speed", {}).get("tone")))
+# The one that is easy to get backwards: below the band is GOOD here.
+check("under the time-to-contact band is BETTER, not short",
+      bars.get("time_to_contact", {}).get("tone") == "good"
+      and bars["time_to_contact"]["verdict"] == "below",
+      "time to contact is lower-is-better; a fast hitter must not be marked short")
+check("a target-band miss is 'watch', never 'short'",
+      all(b["tone"] in ("watch", "in") for b in bars.values()
+          if metrics.get(b["key"]) and
+          metrics.get(b["key"]).polarity == metrics.TARGET_BAND),
+      str([(b['key'], b['tone']) for b in bars.values()]))
+check("a tee-heavy hitter gets the drill caveat, since these averages include "
+      "every drill", bm and bm.get("drill_note"), str(bm and bm.get("drill_note")))
+check("a negative band is written out, not rendered as a double minus",
+      bars.get("vertical_bat_angle", {}).get("range_txt", "").count("--") == 0
+      and " to " in bars.get("vertical_bat_angle", {}).get("range_txt", ""),
+      repr(bars.get("vertical_bat_angle", {}).get("range_txt")))
+check("the marker position is clamped so a big miss stays on the track",
+      all(-0.3 <= b["pos"] <= 1.3 for b in bars.values()),
+      str([(b['key'], round(b['pos'], 2)) for b in bars.values()]))
+
+# The two pools must stay separate -- merging them produces a number that
+# answers neither question.
+strip = percentiles.blast_strip(ENGINE, 200)
+check("the teammate ranking and the vendor benchmark are separate objects",
+      strip is not None and bm is not None and "bars" in strip and "bars" in bm
+      and strip.get("drills") is not None and bm.get("level") is not None)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) FAILED:")

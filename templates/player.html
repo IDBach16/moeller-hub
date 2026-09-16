@@ -50,9 +50,31 @@
   font-size:1rem;font-weight:800;color:var(--gold-light);
   min-width:3.1rem;text-align:right}
 /* Two layers, one question: what he did in games, and what the stuff is. */
+.rank-head{display:flex;flex-wrap:wrap;gap:.7rem 1.2rem;align-items:flex-start;
+  justify-content:space-between;margin-bottom:.2rem}
+.rank-head>div{flex:1 1 22rem;min-width:0}
+.rank-head h2{margin-bottom:.2rem}
+.rank-pick{flex:0 0 auto;margin-top:.15rem}
+.rank-pick select{font:inherit;font-size:.8rem;font-weight:600;color:var(--gold);
+  background:rgba(197,165,90,.08);border:1px solid rgba(197,165,90,.3);
+  border-radius:7px;padding:.42rem 2rem .42rem .7rem;cursor:pointer;
+  -webkit-appearance:none;appearance:none;max-width:min(20rem,78vw);
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23C5A55A' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right .7rem center}
+.rank-pick select:hover{background-color:rgba(197,165,90,.14)}
+.rank-pick select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+/* The native menu inherits the OS surface, so options need explicit colors or
+   they render as dark-on-dark on some platforms. */
+.rank-pick select option{background:#1a1a2e;color:#fff}
+
 .pctblock{margin-top:1.1rem;padding-top:.9rem;
   border-top:1px solid rgba(255,255,255,.08)}
 .pctblock:first-of-type{margin-top:.7rem;padding-top:0;border-top:none}
+.pctblock[hidden]{display:none!important}
+/* Only one block shows at a time once the picker is live, so whichever it is
+   loses the divider -- :first-of-type still matches a hidden sibling and would
+   leave a rule hanging above the visible one. */
+.pctblock.solo{margin-top:.7rem;padding-top:0;border-top:none}
 .pcthead{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;
   margin-bottom:.7rem}
 .pctwhat{font-size:.78rem;font-weight:700;letter-spacing:.06em;
@@ -230,6 +252,39 @@ a.pctyear:hover{color:var(--gold-light);background:rgba(255,255,255,.05)}
 .pctwhy{font-size:.72rem;color:var(--muted);margin:0 0 .2rem;font-style:italic}
 .pctmix{margin:-.2rem 0 .8rem;max-width:64ch}
 .pctmixlist{display:block;opacity:.75;margin-top:.15rem}
+
+/* Blast benchmark bands. Not the percentile bar: a percentile fills from zero,
+   a band is a region you are inside or outside, so the mark is a point on a
+   track and the band is drawn as a region within it. */
+.bmks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr));
+  gap:1rem 1.6rem}
+.bmk-row{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem}
+.bmk-lab{font-size:.82rem;color:rgba(255,255,255,.82)}
+.bmk-val{font-family:var(--mono,ui-monospace,monospace);font-size:.95rem;font-weight:600}
+.bmk-val small{font-size:.66rem;opacity:.55;margin-left:.12rem}
+.bmk-track{position:relative;height:18px;margin:.32rem 0 .22rem}
+/* The rail runs the whole width; the BAND is the lit region inside it, so
+   "inside / outside" is the thing you see first. */
+.bmk-track::before{content:"";position:absolute;left:0;right:0;top:8px;height:2px;
+  border-radius:1px;background:rgba(255,255,255,.07)}
+.bmk-band{position:absolute;left:20%;width:60%;top:4px;height:10px;border-radius:3px;
+  background:var(--gold-dim);border:1px solid rgba(197,165,90,.42)}
+.bmk-ideal{position:absolute;top:3px;width:1px;height:12px;background:rgba(255,255,255,.4)}
+.bmk-mark{position:absolute;top:1px;width:9px;height:16px;border-radius:3px;
+  transform:translateX(-50%);background:var(--gold);
+  box-shadow:0 0 0 2px var(--navy-deep)}
+.bmk-foot{display:flex;justify-content:space-between;gap:.6rem;font-size:.68rem;color:var(--muted)}
+.bmk-range{font-family:var(--mono,ui-monospace,monospace);opacity:.8}
+.bmk-verd{font-weight:600}
+.bmk-flag{font-size:.66rem;color:var(--muted);opacity:.85;margin-top:.25rem;line-height:1.45}
+.bmk.t-short .bmk-mark{background:#dd7a63}
+.bmk.t-short .bmk-verd{color:#dd7a63}
+.bmk.t-good .bmk-mark{background:#58b38a}
+.bmk.t-good .bmk-verd{color:#58b38a}
+.bmk.t-watch .bmk-mark{background:#6ba7dd}
+.bmk.t-watch .bmk-verd{color:#6ba7dd}
+.bmk.t-in .bmk-mark{background:rgba(255,255,255,.72)}
+.bmk.t-in .bmk-verd{color:var(--muted);font-weight:400}
 
 /* session log */
 .src{display:block;font-size:.64rem;color:rgba(255,255,255,.32);
@@ -464,18 +519,30 @@ td.strong{color:var(--white);font-weight:700}
      against the arms he is measured with. Both are needed and neither
      substitutes for the other. One strip per pitch -- pooling a fastball's
      15" of ride with a slider's 2" would rank neither. #}
-  {% if strips or game_strip or game_bat or blast %}
+  {% if strips or game_strip or game_bat or blast or blast_bench %}
   <section class="panel">
-    <h2>Where he ranks</h2>
-    <p class="hint">Against his own teammates &mdash; not against high school
-      baseball at large. Every metric shown here was reliability-tested first;
-      anything that could not rank a player at Moeller sample sizes was left
-      off rather than drawn faintly.</p>
+    <div class="rank-head">
+      <div>
+        <h2>Where he ranks</h2>
+        <p class="hint">Every metric here was reliability-tested first; anything
+          that could not rank a player at Moeller sample sizes was left off
+          rather than drawn faintly.</p>
+      </div>
+      {# Built from whichever blocks actually rendered, so a hitter gets three
+         options and a two-way player five, without this list being maintained
+         per player. Hidden when there is only one block to show. #}
+      <label class="rank-pick" for="rankView" hidden
+             data-side="{{ 'pitching' if p.player.is_pitcher else 'hitting' }}">
+        <span class="sr-only">Which comparison to show</span>
+        <select id="rankView"></select>
+      </label>
+    </div>
 
     {# ---- In games. For a hitter this is the whole panel; for a pitcher it is
        the half that says what the stuff actually did. ---- #}
     {% for gs in [game_strip, game_bat] if gs %}
-    <div class="pctblock">
+    {% set glabel = 'In games — ' + ('on the mound' if gs.side == 'pitching' else 'at the plate') %}
+    <div class="pctblock" data-view="game-{{ gs.side }}" data-view-label="{{ glabel }}">
       <div class="pcthead">
         <span class="pctwhat">In games &mdash;
           {{ 'on the mound' if gs.side == 'pitching' else 'at the plate' }}</span>
@@ -530,7 +597,7 @@ td.strong{color:var(--white);font-weight:700}
     {% endfor %}
 
     {% if strips %}
-    <div class="pctblock">
+    <div class="pctblock" data-view="bullpen" data-view-label="In the bullpen — Rapsodo">
       <div class="pcthead">
         <span class="pctwhat">In the bullpen &mdash; Rapsodo</span>
         <span class="pcthint">shape and arm strength only, never command</span>
@@ -594,9 +661,9 @@ td.strong{color:var(--white);font-weight:700}
        session log are both per drill, because there he is being compared to
        himself, which is the case where the split is mandatory. ---- #}
     {% if blast %}
-    <div class="pctblock">
+    <div class="pctblock" data-view="cage" data-view-label="In the cage — Blast (Moeller Benchmarks)">
       <div class="pcthead">
-        <span class="pctwhat">In the cage &mdash; Blast</span>
+        <span class="pctwhat">In the cage &mdash; Blast (Moeller Benchmarks)</span>
         <span class="pctyears"><span class="pctyear on">{{ blast.swings }} swings</span></span>
       </div>
       {% if blast.drills %}
@@ -652,6 +719,116 @@ td.strong{color:var(--white);font-weight:700}
       {% endif %}
     </div>
     {% endif %}
+    {# ---- Against Blast's own published bands. A SECOND pool, never merged
+       with the teammate ranking above: that one answers "how does he compare
+       to the guys next to him", this answers "is he where Blast says a hitter
+       at his level should be". A single blended number would mean neither. ---- #}
+    {% if blast_bench %}
+    <div class="pctblock" data-view="bench" data-view-label="Against Blast’s benchmarks">
+      <div class="pcthead">
+        <span class="pctwhat">Against Blast&rsquo;s benchmarks</span>
+        <span class="pctyears"><span class="pctyear on">{{ blast_bench.level_label }}</span></span>
+      </div>
+      <p class="hint pctmix">
+        Blast&rsquo;s published bands for his level, from their
+        &ldquo;How Do You Measure Up?&rdquo; table &mdash; not our data.
+        Averaged over all {{ blast_bench.swings }} of his swings, tagged or not,
+        because Blast&rsquo;s bands are not drill-specific either.
+        {%- if not blast_bench.level_known %}
+        <span class="pctmixlist">No 2026 roster level on file for him, so the JV
+          band is used &mdash; the more forgiving of the two.</span>{% endif %}
+        {%- if blast_bench.drill_note %}
+        <span class="pctmixlist">{{ blast_bench.drill_note }}</span>{% endif %}
+      </p>
+
+      <div class="bmks">
+        {% for b in blast_bench.bars %}
+        <div class="bmk t-{{ b.tone }}">
+          <div class="bmk-row">
+            <span class="bmk-lab">{{ b.label }}</span>
+            <span class="bmk-val">{{ b.display }}<small>{{ b.unit }}</small></span>
+          </div>
+          {# The band occupies the middle of the track, so a miss sits visibly
+             outside it rather than pinned to the end of the bar. #}
+          <div class="bmk-track">
+            <div class="bmk-band"></div>
+            {% if b.ideal is not none %}
+            <div class="bmk-ideal"
+                 style="left:{{ 20 + 60 * (b.ideal - b.lo) / ((b.hi - b.lo) or 1) }}%"
+                 title="Blast's stated ideal: {{ b.ideal }}{{ b.unit }}"></div>
+            {% endif %}
+            <div class="bmk-mark" style="left:{{ 20 + 60 * b.pos }}%"></div>
+          </div>
+          <div class="bmk-foot">
+            <span class="bmk-range">{{ b.range_txt }}</span>
+            <span class="bmk-verd">
+              {%- if b.tone == 'short' %}below the band
+              {%- elif b.tone == 'good' %}better than the band
+              {%- elif b.tone == 'watch' %}outside the band
+              {%- else %}in band{% endif %}</span>
+          </div>
+          {% if b.wide or b.provisional %}
+          <div class="bmk-flag">
+            {%- if b.provisional %}Blast prints this JV band as &ldquo;55&ndash;56 mph&rdquo;, which is not a
+              credible one-mph range; their Amateur column (55&ndash;65) is used instead. Treat as provisional.
+            {%- elif b.wide %}Blast&rsquo;s band here is wide enough that every Moeller hitter clears it &mdash;
+              passing it is not evidence of much.{% endif %}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  <script>
+  (function(){
+    var sel = document.getElementById('rankView');
+    if(!sel) return;
+    var blocks = Array.prototype.slice.call(
+      document.querySelectorAll('.pctblock[data-view]'));
+    if(blocks.length < 2) return;            // nothing to choose between
+
+    var wrap = sel.closest('.rank-pick');
+    wrap.hidden = false;
+    sel.innerHTML = blocks.map(function(b){
+      return '<option value="' + b.dataset.view + '">' + b.dataset.viewLabel + '</option>';
+    }).join('');
+
+    var KEY = 'moe.rankView';
+    function show(view){
+      blocks.forEach(function(b){
+        var on = b.dataset.view === view;
+        b.hidden = !on;
+        b.classList.toggle('solo', on);
+      });
+      sel.value = view;
+      /* Per-viewer convenience only, and the page must render correctly when
+         storage is unavailable (private window, blocked site data). */
+      try { localStorage.setItem(KEY, view); } catch(e){}
+    }
+
+    var saved = null;
+    try { saved = localStorage.getItem(KEY); } catch(e){}
+    var start = blocks.some(function(b){ return b.dataset.view === saved; })
+      ? saved
+      /* Otherwise: GAME FIRST, on the side he actually is. What happened in
+         competition is the headline; the cage and the bullpen are how he got
+         there. Defaulting to training hid the game percentiles behind a
+         dropdown, which reads as having removed them. */
+      : (function(){
+          var order = wrap.dataset.side === 'pitching'
+            ? ['game-pitching', 'bullpen', 'game-hitting', 'cage', 'bench']
+            : ['game-hitting', 'cage', 'bench', 'game-pitching', 'bullpen'];
+          for(var i = 0; i < order.length; i++){
+            var hit = blocks.filter(function(b){ return b.dataset.view === order[i]; })[0];
+            if(hit) return hit.dataset.view;
+          }
+          return blocks[0].dataset.view;
+        })();
+
+    show(start);
+    sel.addEventListener('change', function(){ show(sel.value); });
+  })();
+  </script>
   </section>
   {% endif %}
 

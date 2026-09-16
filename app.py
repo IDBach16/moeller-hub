@@ -531,6 +531,10 @@ def create_app():
         # Ranked for anyone with bat data, two-way players included; his bat is
         # not a footnote just because he also pitches.
         blast = percentiles.blast_strip(_engine(), p["player"]["id"])
+        # The second pool, and deliberately a separate panel: blast_strip ranks
+        # him against his TEAMMATES, this says whether he is where Blast says a
+        # hitter at his level should be. Merging them means neither.
+        blast_bench = percentiles.blast_benchmark(_engine(), p["player"]["id"])
         # In-season, from the charted games -- the competition layer.
         awre_name = p["aliases"].get("awre") or p["player"]["name"]
         gyear = request.args.get("gyear")
@@ -543,7 +547,7 @@ def create_app():
         return render_template(
             "player.html", nav="players", p=p, card=card, slog=slog,
             strips=strips, game_strip=game_strip, game_bat=game_bat,
-            blast=blast,
+            blast=blast, blast_bench=blast_bench,
             writes_enabled=writes_enabled(),
             metric_options=development.goal_metric_options(),
             directions=db.GOAL_DIRECTIONS,

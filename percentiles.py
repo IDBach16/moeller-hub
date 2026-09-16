@@ -964,3 +964,125 @@ def blast_strip(engine, player_id):
             "swings": sum(n for _d, n in mix),
             "drills": [{"drill": metrics.split_label(d), "n": n}
                        for d, n in mix if n]}
+
+
+def _player_level(engine, player_id, season=2026):
+    """His level that season, or None. Drives which Blast band he is read against."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(db.player_seasons.c.level)
+            .where((db.player_seasons.c.player_id == player_id) &
+                   (db.player_seasons.c.season == season))
+            .order_by(db.player_seasons.c.id.desc())).first()
+    return row.level if row else None
+
+
+def blast_benchmark(engine, player_id, season=2026):
+    """Where a hitter sits against BLAST'S OWN published bands for his level.
+
+    The companion to blast_strip(), and deliberately a separate panel: that one
+    answers "how does he compare to his teammates", this one answers "is he where
+    Blast says a hitter at his level should be". Merging them would produce a
+    number that means neither.
+
+    Averaged over ALL his swings, tagged and untagged, because Blast's bands are
+    not drill-specific either -- theirs is a number taken over whatever a hitter
+    did. That makes this figure drill-mix dependent in a way the teammate ranking
+    deliberately is not, which is why `drill_note` is returned: a hitter whose
+    work is mostly tee reads low here for a reason that is not his swing.
+    """
+    level = _player_level(engine, player_id, season)
+    table = _blast_table(engine)
+    mine = {d: t for (p, d), t in table.items() if p == player_id}
+
+    # Untagged swings count here (unlike everywhere else in this module) because
+    # the benchmark they are being read against is itself drill-agnostic.
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(db.swings.c.metric_key,
+                   func.count().label("n"),
+                   func.avg(db.swings.c.value).label("mean"))
+            .where((db.swings.c.player_id == player_id) &
+                   (db.swings.c.value.isnot(None)))
+            .group_by(db.swings.c.metric_key)).all()
+    avg = {r.metric_key: (float(r.mean), int(r.n)) for r in rows}
+    if not avg:
+        return None
+
+    bars = []
+    for key, label, unit, _hb, _min_n, _blurb in BLAST_STRIP:
+        if key not in avg:
+            continue
+        band = metrics.blast_band(key, level)
+        if band is None:
+            continue
+        v, n = avg[key]
+        lo, hi = band
+        m = metrics.get(key)
+
+        if v < lo:
+            verdict = "below"
+        elif v > hi:
+            verdict = "above"
+        else:
+            verdict = "in"
+
+        # What the miss MEANS depends on the metric, not on which side it fell.
+        # Above the band is excellent on bat speed and merely fast on time to
+        # contact; on a target-band metric it is neither, just outside.
+        if verdict == "in":
+            tone = "in"
+        elif m and m.polarity == metrics.HIGHER_BETTER:
+            tone = "good" if verdict == "above" else "short"
+        elif m and m.polarity == metrics.LOWER_BETTER:
+            tone = "good" if verdict == "below" else "short"
+        else:
+            tone = "watch"
+
+        # Position on the band for the marker, clamped a little outside so a
+        # miss is visible rather than pinned to the edge.
+        span = (hi - lo) or 1.0
+        pos = (v - lo) / span
+        bars.append({
+            "key": key, "label": label, "unit": unit,
+            "value": round(v, m.decimals if m else 2),
+            "display": metrics.format_value(key, v),
+            "n": n, "lo": lo, "hi": hi,
+            "lo_txt": metrics.format_value(key, lo),
+            "hi_txt": metrics.format_value(key, hi),
+            # "-40.0--10.0" is unreadable; a negative range gets a written one.
+            "range_txt": ((f"{metrics.format_value(key, lo)} to "
+                           f"{metrics.format_value(key, hi)}{unit}")
+                          if (lo < 0 or hi < 0) else
+                          (f"{metrics.format_value(key, lo)}–"
+                           f"{metrics.format_value(key, hi)}{unit}")),
+            "ideal": metrics.BLAST_IDEAL.get(key),
+            "verdict": verdict, "tone": tone,
+            "pos": max(-0.28, min(1.28, pos)),
+            "wide": key in metrics.BLAST_WIDE,
+            "provisional": (key, level or "jv") in metrics.BLAST_PROVISIONAL,
+        })
+
+    if not bars:
+        return None
+
+    # Drill mix, because these averages ARE affected by it and the reader should
+    # be able to see when a low number is a cage plan rather than a swing.
+    total = sum(t.get("bat_speed_n") or 0 for t in mine.values())
+    mix = sorted(((d, t.get("bat_speed_n") or 0) for d, t in mine.items()),
+                 key=lambda kv: -kv[1])
+    drills = [{"drill": metrics.split_label(d) if d else "Untagged",
+               "pct": int(round(100.0 * n / total))}
+              for d, n in mix if n and total]
+    tee = next((d["pct"] for d in drills if d["drill"] == "Tee"), 0)
+    note = None
+    if tee >= 50:
+        note = (f"{tee}% of his swings are off a tee, which runs about 2 mph "
+                f"under an average drill. These figures read low for that reason, "
+                f"not his swing.")
+
+    return {"level": level, "level_label": metrics.BLAST_LEVELS.get(level or "jv",
+                                                                   "High School (JV)"),
+            "level_known": level is not None,
+            "bars": bars, "drills": drills, "drill_note": note,
+            "swings": avg.get("bat_speed", (0, 0))[1]}

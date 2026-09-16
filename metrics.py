@@ -491,3 +491,91 @@ def format_value(key, value):
     if m is None:
         return str(round(float(value), 2))
     return f"{float(value):.{m.decimals}f}"
+
+
+# ---------------------------------------------------------------------------
+# Blast's own published benchmarks  ("How Do You Measure Up?")
+# ---------------------------------------------------------------------------
+# Transcribed 2026-09-16 from https://blastmotion.com/products/baseball/ -- the
+# vendor's own table, NOT anything derived from our data. This is the second,
+# clearly-labelled pool the percentile note asks for: `percentiles.BLAST_STRIP`
+# ranks a hitter against his TEAMMATES, and this says where he sits against the
+# level Blast says he should be hitting. Different questions, both worth asking,
+# never merged into one number.
+#
+# THREE THINGS TO KNOW BEFORE TRUSTING A VERDICT FROM THIS TABLE:
+#
+#  1. ** The JV bat-speed cell renders as "55-56 MPH" on the page. ** That is not
+#     a credible one-mph band. JV duplicates the "Amateur All Levels" column
+#     EXACTLY for hand speed (17-21) and power (2.17-3.45), so that column's
+#     bat speed (55-65) is used here. Flagged as provisional on the page rather
+#     than presented as read.
+#
+#  2. ** Blast publishes different numbers in different places. ** Their own blog
+#     gives varsity 57-71 and JV 53-67 against this page's 60-70. We use the
+#     product-page table throughout so at least one source is applied
+#     consistently. blastconnect.com now redirects to WIN Reality -- Blast has
+#     been absorbed, which is the likely reason the two disagree, and a reason to
+#     re-read this table before the spring.
+#
+#  3. ** Two of these bands pass everybody. ** Attack angle (0-15 deg) and
+#     vertical bat angle (-10 to -40 deg) are wide enough that all 19 of our
+#     measured hitters clear them. `wide=True` marks those so the page can say
+#     the band is uninformative rather than let a coach read 19/19 as good news.
+#
+# Blast's "Rotation Score" is on their table and absent here: it is a Blast
+# composite the CSV export does not carry, and we will not approximate it with
+# rotational acceleration, which is a different measurement.
+
+BLAST_LEVELS = {
+    "varsity": "High School (Varsity)",
+    "jv": "High School (JV)",
+    # Blast has no freshman column. A high-school freshman is a JV-level hitter,
+    # not the "Middle School" one -- that column is for younger players.
+    "freshman": "High School (JV)",
+}
+
+# metric key -> {level: (lo, hi)}. Level "*" applies to everyone.
+BLAST_BENCHMARKS = {
+    "bat_speed":          {"varsity": (60.0, 70.0), "jv": (55.0, 65.0)},
+    "peak_hand_speed":    {"varsity": (19.0, 23.0), "jv": (17.0, 21.0)},
+    "power":              {"varsity": (2.81, 4.09), "jv": (2.17, 3.45)},
+    "time_to_contact":    {"varsity": (0.15, 0.18), "jv": (0.15, 0.20)},
+    "attack_angle":       {"varsity": (2.0, 15.0),  "jv": (0.0, 15.0)},
+    "vertical_bat_angle": {"*": (-40.0, -10.0)},
+    "on_plane_efficiency": {"*": (65.0, 85.0)},
+    "early_connection":   {"*": (80.0, 105.0)},
+    "connection_at_impact": {"*": (80.0, 95.0)},
+}
+
+# Bands so wide that every hitter clears them -- see note 3 above.
+BLAST_WIDE = {"attack_angle", "vertical_bat_angle"}
+
+# Blast's own stated ideal inside the band, where the page gives one. Shown as a
+# marker, never as a pass/fail: missing the ideal while inside the band is not a
+# finding.
+BLAST_IDEAL = {
+    "on_plane_efficiency": 70.0,     # "70% or higher"
+    "early_connection": 90.0,        # "90 degrees (perpendicular)"
+    "connection_at_impact": 90.0,
+}
+
+# The JV bat-speed substitution from note 1. Surfaced so the page can mark it.
+BLAST_PROVISIONAL = {("bat_speed", "jv"), ("bat_speed", "freshman")}
+
+
+def blast_band(metric_key, level):
+    """(lo, hi) from Blast's published table for this metric at this level.
+
+    Returns None where Blast publishes no band for the metric. `level` is ours
+    (varsity / jv / freshman); anything unrecognised is treated as JV, which is
+    the more forgiving band -- we would rather understate a shortfall than invent
+    one against a player whose level we do not actually know.
+    """
+    table = BLAST_BENCHMARKS.get(metric_key)
+    if not table:
+        return None
+    if "*" in table:
+        return table["*"]
+    key = level if level in table else ("varsity" if level == "varsity" else "jv")
+    return table.get(key)
