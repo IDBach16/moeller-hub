@@ -443,7 +443,11 @@ td.strong{color:var(--white);font-weight:700}
 
   <!-- ============ 9. AI SUMMARY -- first thing a coach reads ============ -->
   <section class="panel">
-    <h2>AI summary</h2>
+    {# Named for the analyst that actually wrote it. summaries.note_spec() picks
+       the prompt off the same is_pitcher flag, so the two must not drift apart:
+       a heading that says "Hitting" over a note written by the pitching analyst
+       is worse than no heading at all. #}
+    <h2>{{ 'Pitching' if p.player.is_pitcher else 'Hitting' }} Development Analyst</h2>
     <p class="hint">
       Written from the changes and goals the database already computed &mdash; not from
       the raw data &mdash; and cached until this player&rsquo;s data moves.
@@ -459,7 +463,9 @@ td.strong{color:var(--white);font-weight:700}
         {% set PT_NAMES = {'FB':'Fastball','SI':'Sinker','CT':'Cutter',
                            'SL':'Slider','CB':'Curveball','CH':'Changeup',
                            'SP':'Splitter','DELIVERY':'Delivery',
-                           'MIX':'Usage mix','GAME':'Game results'} %}
+                           'MIX':'Usage mix','GAME':'Game results',
+                           'SWING':'Swing','PATH':'Bat path','CONTACT':'Contact',
+                           'DRILLS':'Drill mix','BENCHMARK':'vs Blast'} %}
         <div class="note-groups">
           {% for grp in note.findings %}
           <div class="note-g">

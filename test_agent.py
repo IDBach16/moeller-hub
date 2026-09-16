@@ -338,6 +338,80 @@ check("a player with nothing has nothing to say",
 check("  and Jack does", summaries.has_anything_to_say(ctx))
 
 
+
+# ===========================================================================
+print("\n6b. one analyst per side")
+# ===========================================================================
+# Before the split there was ONE prompt and it opened "You are the pitching
+# development analyst" -- so every hitter's note was written in a pitcher's
+# voice, asking for findings grouped under pitch codes a hitter does not have.
+# Harmless while hitters had no swing data; not harmless afterwards.
+
+p_sys, p_schema = summaries.note_spec({"role": "pitcher"})
+h_sys, h_schema = summaries.note_spec({"role": "position player"})
+
+check("a pitcher gets the pitching analyst",
+      p_sys.startswith("You are the pitching development analyst"))
+check("a hitter gets the HITTING analyst, not the pitching one",
+      h_sys.startswith("You are the hitting development analyst"),
+      h_sys[:60])
+check("the two prompts are actually different text", p_sys != h_sys)
+check("an unknown role falls to hitting rather than crashing",
+      summaries.note_spec({})[0] is h_sys and summaries.note_spec(None)[0] is h_sys)
+
+def parents(schema):
+    return schema["properties"]["findings"]["items"]["properties"]["parent"]["enum"]
+
+check("the pitching schema offers pitch codes",
+      {"FB", "SL", "DELIVERY", "MIX"} <= set(parents(p_schema)))
+check("the hitting schema offers swing groups",
+      {"SWING", "PATH", "CONTACT", "DRILLS"} <= set(parents(h_schema)))
+# The enum is what ENFORCES the split -- the prompt only asks.
+check("a hitting note CANNOT emit a pitch code",
+      not (set(parents(h_schema)) & {"FB", "SI", "CT", "SL", "CB", "CH", "SP", "DELIVERY"}),
+      str(parents(h_schema)))
+check("a pitching note CANNOT emit a swing group",
+      not (set(parents(p_schema)) & {"SWING", "PATH", "CONTACT", "DRILLS", "BENCHMARK"}),
+      str(parents(p_schema)))
+check("GAME is the one group both sides share",
+      "GAME" in parents(p_schema) and "GAME" in parents(h_schema))
+
+# The rules that keep a hitting note honest, and that are easy to lose in a
+# rewrite. Ian is replacing these prompts with his own -- these checks say what
+# must survive that, not how it must be worded.
+low = h_sys.lower()
+check("the hitting prompt says up is not automatically good",
+      "up is not automatically good" in low and "target band" in low,
+      "a target-band metric read by direction congratulates a hitter who got worse")
+check("  and tells it to trust the favorable flag",
+      "favorable" in low and "trust that flag" in low)
+check("the hitting prompt makes it name the drill",
+      "name the drill" in low,
+      "the hitting twin of the pitching prompt's 'name the pitch'")
+check("  and reports drill mix as usage, never as a swing change",
+      "cage_drill_mix" in low and "never as a change in his swing" in low)
+check("the hitting prompt refuses to prescribe mechanics",
+      "do not prescribe mechanics" in low)
+check("  the pitching one still does too",
+      "do not prescribe mechanics" in p_sys.lower())
+check("the hitting prompt warns that two Blast bands pass everybody",
+      "wide enough that every moeller hitter clears them" in low)
+
+# _call_model reads the role off the context, so no signature changed and the
+# injectable stub the tests above use still works untouched.
+import inspect                                              # noqa: E402
+check("_call_model still takes only the context",
+      list(inspect.signature(summaries._call_model).parameters) == ["context"],
+      "adding an argument here would break every call_model stub")
+
+# The page heading is picked from the same flag as the prompt. If they drift, a
+# note written by the pitching analyst gets a "Hitting" heading over it.
+tpl = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "templates", "player.html"), encoding="utf-8").read()
+check("the panel heading names the analyst that wrote it",
+      "Development Analyst" in tpl and "'Pitching' if p.player.is_pitcher else 'Hitting'" in tpl,
+      "heading and prompt must key off the same is_pitcher flag")
+
 # ===========================================================================
 print("\n7. summaries are cached, not regenerated")
 # ===========================================================================

@@ -33,7 +33,7 @@ import metrics
 
 MODEL = "claude-opus-5"
 
-SYSTEM = """You are the pitching development analyst for Archbishop Moeller High \
+SYSTEM_PITCHING = """You are the pitching development analyst for Archbishop Moeller High \
 School. The coaching staff sees the numbers themselves; your job is to read them \
 the way a sharp analyst would and tell the staff what they mean, so they don't \
 have to work it out from a table.
@@ -98,44 +98,156 @@ improving. Say so plainly when that is the story.
 is fine. Do not address the player; you write for coaches about him."""
 
 
+
+SYSTEM_HITTING = """You are the hitting development analyst for Archbishop Moeller \
+High School. The coaching staff sees the numbers themselves; your job is to read \
+them the way a sharp analyst would and tell the staff what they mean, so they \
+don't have to work it out from a table.
+
+You are given a compact summary that the database has already computed: recent \
+cage sessions, detected changes against the hitter's own baseline, what kind of \
+swings he has been taking, his game results at the plate, where he sits against \
+Blast's published bands for his level, active development goals, and any logged \
+interventions. You are NOT given the raw swings, and you must not ask for them.
+
+BE AN ANALYST, NOT A REPORT. Anyone can list what moved; what earns your place \
+is the interpretation. You answer as JSON matching the schema you are given, \
+and the page renders each field with its own visual treatment, so keep every \
+field doing exactly its own job:
+
+- "read": ONE sentence, the single thing that matters most right now and why. \
+The interpretation, not the numbers -- "He has moved almost entirely off the \
+tee and onto live reps, and the bat has held up" beats "tee share fell 74.9 \
+points". A coach who reads only this line should know what to think about.
+- "findings": grouped PARENT -> CHILDREN, 2 to 5 groups. The parent names what \
+the evidence is about; the items are its variables, ONE short sentence each, \
+each resting on a number you were given (show the number). Parents: "SWING" \
+for the engine -- bat speed, hand speed, rotational acceleration, power; \
+"PATH" for where the barrel goes -- attack angle, on-plane efficiency, \
+vertical bat angle; "CONTACT" for timing and the body-to-barrel relationship \
+-- time to contact, commit time, early connection, connection at impact; \
+"DRILLS" for a shift in what kind of swings he is taking; "BENCHMARK" for \
+where he sits against Blast's published band for his level; "GAME" for results \
+at the plate. Never repeat a parent. Order groups by how much a coach should \
+care. ALWAYS use the game data (game_hitting) when it is present -- cage work \
+says what the swing is doing, game data says whether it played, and setting the \
+two against each other is the whole reason they live in one system. Set each \
+item's "tone" to "good" for a favorable development, "bad" for a concerning \
+one, "neutral" for information that is neither.
+- "watch": 1 or 2 suggestions the staff could act on, each opened with "Worth" \
+or "Suggest" so it reads as an option, not an instruction. Things to CHECK, \
+ASK, MEASURE or WATCH, and conditionals tied to what the data would show: \
+"Worth asking whether the move off the tee was planned -- if it was, his live \
+bat speed is the number to track from here." Do NOT prescribe mechanics: you \
+do not see him swing, have no video and no biomechanics, so never "get on plane \
+earlier", "stay through the ball", "close his stance", or any instruction about \
+how to move his body. The staff decides what to do; you point at what deserves \
+attention. If the data is too thin to suggest anything useful, return an empty \
+list and say so in "caveat" -- never invent a suggestion.
+- "caveat": one sentence on sample size or data thinness when a coach needs the \
+warning ("two tagged sessions is thin for calling a path change settled"), or \
+"" when there is nothing to flag. Saying something IS solid also belongs here.
+
+Rules for every field:
+- Every claim rests on a number you were given. Never invent one; if something \
+isn't in the context, don't mention it.
+- A change is a comparison, not a cause. If an intervention is logged near a \
+change you may note the timing, but do not claim the intervention caused it.
+- UP IS NOT AUTOMATICALLY GOOD. Attack angle, vertical bat angle, early \
+connection and connection at impact are TARGET BANDS: a hitter whose attack \
+angle climbs from 11 to 19 degrees has got worse, not better. Every change you \
+are given already carries a "favorable" flag computed from the registry -- \
+trust that flag over the direction of the number, always.
+- NAME THE DRILL. Changes are scoped to one drill because a tee swing and a \
+live swing are different measurements -- our hitters average about 2 mph slower \
+off a tee. Say "his tee bat speed" or "his machine work", never "his bat \
+speed", and never generalise one drill's number to his swing as a whole.
+- WHAT KIND OF SWINGS HE TAKES IS A FINDING TOO. A notable cage_drill_mix shift \
+is a deliberate act worth a coach's attention -- report it under DRILLS as a \
+change in what he is practising, NEVER as a change in his swing. It fires no \
+change detection by design, so if you don't report it nobody sees it.
+- Untagged swings drive no finding. If much of his work is untagged, that is \
+worth one line in "caveat" -- it is fixed by tagging in the Blast app.
+- Blast's bands are the VENDOR's, not ours, and two of them (attack angle, \
+vertical bat angle) are wide enough that every Moeller hitter clears them. \
+Clearing those two is not evidence of anything; do not present it as a finding.
+- An empty change list means nothing cleared the thresholds, not that he isn't \
+improving. Say so plainly when that is the story.
+- Plain text inside every string -- no markdown, no bullets. Baseball shorthand \
+is fine. Do not address the player; you write for coaches about him."""
+
+
+# One analyst per side. The pitching prompt asks for findings grouped under pitch
+# codes and DELIVERY; a hitter has neither, and before this split every hitter's
+# note was written by a model told it was the pitching analyst. That was
+# harmless while hitters had no swing data and stopped being harmless the day
+# 85,917 swings landed.
+#
+# A two-way player gets the analyst for what he PRIMARILY is (players.is_pitcher),
+# because a note needs one voice. His other side still reaches the model -- the
+# context carries both -- and each prompt can group it under GAME.
+
 # What _call_model forces the note into. The template renders these fields
 # directly, so the shape is a contract, not a suggestion.
-NOTE_SCHEMA = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["read", "findings", "watch", "caveat"],
-    "properties": {
-        "read": {"type": "string"},
-        "findings": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["parent", "items"],
-                "properties": {
-                    "parent": {"type": "string",
-                               "enum": ["FB", "SI", "CT", "SL", "CB", "CH", "SP",
-                                        "DELIVERY", "MIX", "GAME"]},
-                    "items": {
-                        "type": "array",
+# The parent enum is per side on purpose: a pitching note must not be able to
+# emit "SWING", and a hitting note must not be able to emit "FB". The enum is the
+# only thing that actually enforces it -- the prompt asks, the schema guarantees.
+PITCHING_PARENTS = ["FB", "SI", "CT", "SL", "CB", "CH", "SP",
+                    "DELIVERY", "MIX", "GAME"]
+HITTING_PARENTS = ["SWING", "PATH", "CONTACT", "DRILLS", "BENCHMARK", "GAME"]
+
+
+def note_schema(parents):
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["read", "findings", "watch", "caveat"],
+        "properties": {
+            "read": {"type": "string"},
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["parent", "items"],
+                    "properties": {
+                        "parent": {"type": "string", "enum": list(parents)},
                         "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["text", "tone"],
-                            "properties": {
-                                "text": {"type": "string"},
-                                "tone": {"type": "string",
-                                         "enum": ["good", "bad", "neutral"]},
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["text", "tone"],
+                                "properties": {
+                                    "text": {"type": "string"},
+                                    "tone": {"type": "string",
+                                             "enum": ["good", "bad", "neutral"]},
+                                },
                             },
                         },
                     },
                 },
             },
+            "watch": {"type": "array", "items": {"type": "string"}},
+            "caveat": {"type": "string"},
         },
-        "watch": {"type": "array", "items": {"type": "string"}},
-        "caveat": {"type": "string"},
-    },
-}
+        }
+
+
+PITCHING_NOTE_SCHEMA = note_schema(PITCHING_PARENTS)
+HITTING_NOTE_SCHEMA = note_schema(HITTING_PARENTS)
+
+
+def note_spec(context):
+    """(system prompt, response schema) for whichever analyst this player needs.
+
+    Keyed off context["role"], which build_context already sets from
+    players.is_pitcher -- so this needs no new argument threaded through
+    generate() or the injectable call_model stub the tests use.
+    """
+    if (context or {}).get("role") == "pitcher":
+        return SYSTEM_PITCHING, PITCHING_NOTE_SCHEMA
+    return SYSTEM_HITTING, HITTING_NOTE_SCHEMA
 
 
 def parse_note(text):
@@ -363,6 +475,29 @@ def build_context(engine, player_id):
     if drills:
         ctx["cage_drill_mix"] = drills
 
+    # Where he sits against Blast's OWN bands. The hitting prompt has a BENCHMARK
+    # group and is told two of these bands pass everybody, so it needs the flags
+    # as well as the verdicts -- otherwise it reports clearing a wide band as a
+    # finding. Only the misses and the near-misses are sent: an in-band metric
+    # with nothing interesting about it is context the model does not need.
+    try:
+        import percentiles
+        bench = percentiles.blast_benchmark(engine, player_id)
+    except Exception:
+        bench = None
+    if bench:
+        notable = [{"metric": b["label"], "value": b["display"] + b["unit"],
+                    "band": b["range_txt"], "verdict": b["tone"],
+                    "band_is_wide": b["wide"]}
+                   for b in bench["bars"] if b["tone"] != "in"]
+        ctx["blast_benchmark"] = {
+            "level": bench["level_label"],
+            "source": "Blast's published bands for his level, not Moeller data",
+            "outside_the_band": notable or "nothing outside his band",
+        }
+        if bench.get("drill_note"):
+            ctx["blast_benchmark"]["caveat"] = bench["drill_note"]
+
     game = prof.get("game") or {}
     if game.get("pitching"):
         g = game["pitching"]
@@ -421,6 +556,7 @@ def store(engine, player_id, want, text, model=MODEL):
 
 def _call_model(context):
     """The one place this module spends money."""
+    system_prompt, schema = note_spec(context)
     import anthropic
     client = anthropic.Anthropic()
     resp = client.messages.create(
@@ -432,8 +568,8 @@ def _call_model(context):
         output_config={"effort": "medium",
                        # The schema guarantees the reply parses; the template
                        # renders the fields directly.
-                       "format": {"type": "json_schema", "schema": NOTE_SCHEMA}},
-        system=[{"type": "text", "text": SYSTEM,
+                       "format": {"type": "json_schema", "schema": schema}},
+        system=[{"type": "text", "text": system_prompt,
                  "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user",
                    "content": "Write the development note for this player.\n\n"

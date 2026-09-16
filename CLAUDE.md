@@ -18,6 +18,40 @@ Their agent `SYSTEM` prompts also contradict each other on formatting (main allo
 a markdown subset, this branch demands plain text). A merge is a ~350-line
 conflict in `app.py` and is its own task — not a step inside another one.
 
+## ⚠ OPEN — Ian is writing the two analyst prompts himself
+
+`SYSTEM_PITCHING` and `SYSTEM_HITTING` in `summaries.py` are **placeholders written
+by Claude**. Ian is replacing both with in-depth prompts from his own hitting and
+pitching knowledge — the goal being an **"MLB analyst"** read that is specific to
+who each player actually is, not a generic template. **Do not polish these in
+passing; they are being rewritten.**
+
+**The order matters: CONTEXT FIRST, THEN PROMPT.** The model never sees raw data —
+`build_context()` hands it a compact object (4,623 chars for JJ Skeldon) and the
+prompt can only reason about what is in it. A deep prompt over a thin context
+produces silence or invention. So: Ian says what the analyst should be able to
+see, that gets computed into the context, and the prompt is written against what
+is actually there.
+
+Candidates raised, none built:
+
+- per-drill splits side by side (tee vs machine vs live), not only changed metrics
+- trend slope over the last N sessions, plus his own session-to-session SD —
+  is he volatile or repeatable?
+- his percentile among Moeller hitters on each metric (`percentiles` already
+  computes this; it is simply not in the context)
+- correlations inside his own swing (does attack angle move with bat speed?)
+- game-vs-cage cross-reference — the hitting twin of the Glotfelty finding: is he
+  practising the swing he actually uses?
+- season arc (spring / summer / fall), not just recent-vs-baseline
+
+**Roster gap found while looking at this:** `bats` and `throws` come through as
+`None` for JJ Skeldon. Handedness changes how most of this reads, so it is worth
+filling before the prompts lean on it.
+
+The `prompt-builder` skill is set up for this job — it interviews and drafts. Run
+it once per side.
+
 ## The two rules that matter most
 
 **1. The database computes. The LLM explains.**
