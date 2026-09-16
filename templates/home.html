@@ -167,6 +167,11 @@ a.wk-game:hover .wg-opp{color:var(--gold)}
     <h1 style="font-size:1.15rem">This week</h1>
     <span class="muted" style="font-size:.8rem">{{ week_label }}</span>
     <a href="/season?week={{ week_start }}" style="font-size:.75rem">Full week &rarr;</a>
+    {# Three things in one number: unresolved names, goals past their review date,
+       interventions past theirs. /team surfaces all three -- the review count as a
+       link into the queue on /collect, the other two in its "Due for review"
+       panel. Keep it that way: if /team ever stops showing one of these, this
+       chip goes back to being a number that sends a coach somewhere it isn't. #}
     {% set attention = overview.counts.open_reviews + due.goals|length + due.interventions|length %}
     {% if attention %}
     <a class="attn" href="/team">{{ attention }} need{{ '' if attention == 1 else 's' }} attention &rarr;</a>

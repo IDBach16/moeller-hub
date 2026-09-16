@@ -183,8 +183,19 @@ def _dedupe_header(header):
 # ---------------------------------------------------------------------------
 
 def store(engine, vendor, filename, raw_bytes, uploaded_by=None,
-          side=None, session_type=None, purpose=None):
-    """Keep the file whole, before any parsing. Returns (import_id, sniffed)."""
+          side=None, session_type=None, purpose=None, row_filter=None):
+    """Keep the file whole, before any parsing. Returns (import_id, sniffed).
+
+    `row_filter` is an optional predicate over sniffed rows, for exports that mix
+    rows we measure with rows we don't -- Blast's CSV carries 'air Swing' records
+    (a sensor reading with no ball, which Blast itself leaves out of a player's
+    averages) alongside real swings. Rows it rejects are counted in the returned
+    dict as `rows_filtered` and named in `filtered_by`, never dropped silently.
+
+    The file's sha256 is still taken over the ORIGINAL bytes, so dedupe and the
+    audit trail are unaffected: re-uploading the same export is still refused, and
+    what is filtered is a property of this import rather than of the file.
+    """
     if vendor not in db.SOURCES:
         raise IngestError(f"unknown vendor '{vendor}'")
 
@@ -199,6 +210,12 @@ def store(engine, vendor, filename, raw_bytes, uploaded_by=None,
             f"'{dupe.filename}', status {dupe.status})")
 
     sniffed = sniff(raw_bytes, filename)
+    if row_filter is not None:
+        kept = [r for r in sniffed["rows"] if row_filter(r)]
+        sniffed["rows_filtered"] = len(sniffed["rows"]) - len(kept)
+        sniffed["filtered_by"] = getattr(row_filter, "__doc__", None) or "row_filter"
+        sniffed["rows"] = kept
+        sniffed["row_count"] = len(kept)
     side = side or VENDOR_SIDE.get(vendor, "hitting")
     session_type = session_type or VENDOR_DEFAULT_SESSION.get(vendor, "cage")
 
@@ -221,7 +238,13 @@ def store(engine, vendor, filename, raw_bytes, uploaded_by=None,
 # a suggestion with no confirmation leaves the column unmapped.
 _HINTS = {
     "player": ["player", "batter", "hitter", "pitcher", "name", "user", "athlete"],
-    "vendor_id": ["player id", "playerid", "user id", "athlete id"],
+    # Blast's CSV splits the name over two columns; these two roles are how a
+    # first/last pair maps without inventing a combined column that isn't there.
+    "player_first": ["first name", "firstname", "first"],
+    "player_last": ["last name", "lastname", "last", "surname"],
+    "vendor_id": ["player id", "playerid", "user id", "athlete id", "userid"],
+    # Blast calls it Environment Tag; it's the drill. See metrics.SWING_CONTEXTS.
+    "context": ["environment tag", "environment", "context", "drill", "swing type"],
     "date": ["date", "session date", "timestamp", "datetime", "created", "time"],
     "session": ["session", "session id", "round", "group", "bucket"],
     "pitch_type": ["pitch type", "pitchtype", "pitch"],
@@ -284,8 +307,9 @@ def analyze(engine, import_id):
 
     roles = {c["mapped_to"] for c in columns if c["mapped_to"]}
     missing = []
-    if "player" not in roles and "vendor_id" not in roles:
-        missing.append("a player column (or a vendor id column)")
+    has_name = "player" in roles or {"player_first", "player_last"} <= roles
+    if not has_name and "vendor_id" not in roles:
+        missing.append("a player column (or a first/last pair, or a vendor id column)")
     if "date" not in roles:
         missing.append("a date column")
     if not (roles & set(metrics.REGISTRY)):
@@ -462,6 +486,10 @@ def commit(engine, import_id, dry_run=False):
         if "vendor_id" in role_col:
             pid = vendor_ids.get(str(row.get(role_col["vendor_id"], "")).strip())
         raw_name = str(row.get(role_col.get("player", ""), "")).strip()
+        if not raw_name and {"player_first", "player_last"} <= set(role_col):
+            first = str(row.get(role_col["player_first"], "")).strip()
+            last = str(row.get(role_col["player_last"], "")).strip()
+            raw_name = f"{first} {last}".strip()
         if pid is None and raw_name:
             pid = names.get(_name_key(raw_name))
         if pid is None:
@@ -489,9 +517,15 @@ def commit(engine, import_id, dry_run=False):
         g = groups.setdefault(ref, {"player_id": pid, "date": d, "rows": [],
                                     "synthesized": synthesized})
         seq = _to_float(row.get(role_col.get("seq", ""))) if "seq" in role_col else None
+        # One slot, two vocabularies: a pitch code on the pitching side, a drill
+        # context on the hitting side. They are never both present -- an export is
+        # one side or the other -- so they share the tuple position all the way
+        # through to change_events.pitch_type. See db.swings.context.
         ptype = None
         if side == "pitching" and "pitch_type" in role_col:
             ptype = metrics.normalize_pitch_type(row.get(role_col["pitch_type"]))
+        elif side == "hitting" and "context" in role_col:
+            ptype = metrics.normalize_context(row.get(role_col["context"]))
 
         values = {}
         for col, cm in metric_cols.items():
@@ -520,6 +554,12 @@ def commit(engine, import_id, dry_run=False):
         stats["unknown_pitch_types"] = sum(
             1 for g in groups.values() for (_s, pt, _v) in g["rows"]
             if "pitch_type" in role_col and pt is None)
+    elif "context" in role_col:
+        # Untagged swings are kept but contribute to no baseline, so this number is
+        # how much of the export can't drive change detection. It belongs in QC in
+        # front of a coach -- it's fixed by tagging in the Blast app, not by code.
+        stats["untagged_swings"] = sum(
+            1 for g in groups.values() for (_s, ctx, _v) in g["rows"] if ctx is None)
 
     if dry_run:
         stats["sessions_new"] = len(groups)
@@ -551,6 +591,8 @@ def commit(engine, import_id, dry_run=False):
                            "seq": seq, "metric_key": key, "value": val}
                     if side == "pitching":
                         rec["pitch_type"] = ptype
+                    else:
+                        rec["context"] = ptype
                     payload.append(rec)
             if payload:
                 conn.execute(insert(table), payload)

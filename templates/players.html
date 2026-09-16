@@ -149,6 +149,13 @@
 .aalbl{display:flex;justify-content:space-between;margin-top:.35rem;
   font-family:ui-monospace,Consolas,monospace;font-size:.62rem;
   color:rgba(255,255,255,.45)}
+/* Drill context on a hitter card -- a qualifier on the numbers above it. */
+.drill{display:inline-block;font-size:.6rem;font-weight:600;letter-spacing:.03em;
+  text-transform:uppercase;padding:.1rem .34rem;border-radius:4px;
+  background:rgba(197,160,89,.14);color:var(--gold);
+  border:1px solid rgba(197,160,89,.28)}
+.drill.untagged{background:rgba(148,148,148,.12);color:#8b8b8b;
+  border-color:rgba(148,148,148,.25);cursor:help}
 </style>
 {% endblock %}
 
@@ -274,6 +281,12 @@
       <div class="viz">
         <div class="nums">
           <div class="fb">{{ h.bat }}<small>avg bat</small></div>
+          {# Which drill these numbers are from. Without it the card invites a
+             comparison between two hitters doing different work -- a tee average
+             and a live average are ~11 mph apart for reasons that have nothing to
+             do with either hitter. #}
+          <div class="slot"><span class="drill{{ ' untagged' if not h.drill }}"
+            {%- if not h.drill %} title="These swings carry no Environment Tag, so they are a mix of drills and drive no change detection."{% endif %}>{{ h.drill_label }}</span></div>
           <div class="slot"><b>{{ h.bat_max }}</b> max
             {%- if h.ope is defined %} &middot; {{ h.ope }}% on plane{% endif %}</div>
           {% if h.ev is defined %}
@@ -290,7 +303,7 @@
       </div>
       {% if h.aa is defined %}
       {# Attack angle against its target band -- green in the band, red out. #}
-      <div class="aaband" title="Attack angle {{ h.aa }}&deg; (band {{ 5 }}&ndash;{{ 15 }}&deg;)">
+      <div class="aaband" title="Attack angle {{ h.aa }}&deg; (band {{ h.band_lo }}&ndash;{{ h.band_hi }}&deg;, calibrated on Moeller hitters)">
         <span class="zone" style="left:{{ h.band_lo_pct }}%;width:{{ h.band_hi_pct - h.band_lo_pct }}%"></span>
         <span class="mk {{ 'in' if h.aa_in_band else 'out' }}" style="left:{{ h.aa_pct }}%"></span>
       </div>

@@ -299,22 +299,84 @@ def show_review(engine):
 
 
 def seed_blast_column_maps(engine):
-    """Pre-seed the Blast header mapping -- the one vendor whose schema we know."""
+    """Pre-seed the Blast header mappings -- the one vendor whose schema we know.
+
+    BOTH schemas are seeded, because Blast has two and they share no column names:
+
+      * BLAST_COLUMNS      the v3 API, recovered from the 2024 R puller
+                           ("swing_speed.value", "bat_path_angle.value", ...)
+      * BLAST_CSV_COLUMNS  the "All swings by player" CSV export
+                           ("Bat Speed (MPH)", "Attack Angle (deg's)", ...)
+
+    They coexist in one table without conflict -- the unique key is
+    (vendor, source_column) and no column name appears in both -- so whichever
+    shape a file arrives in, its columns are already mapped and the coach is not
+    asked to map twenty headers by hand.
+
+    The CSV map carries a real scale on one column: On Plane Efficiency ships as
+    a 0-1 fraction despite the (%) in its header. See BLAST_CSV_COLUMNS.
+    """
     import metrics
     added = 0
+    # (column -> (metric_key, unit, scale)) for both schemas, API first.
+    combined = {c: (k, u, 1.0) for c, (k, u) in metrics.BLAST_COLUMNS.items()}
+    combined.update(metrics.BLAST_CSV_COLUMNS)
     with engine.begin() as conn:
         have = {r.source_column for r in conn.execute(
             select(db.column_maps.c.source_column).where(
                 db.column_maps.c.vendor == "blast"))}
-        for col, (key, unit) in metrics.BLAST_COLUMNS.items():
+        for col, (key, unit, scale) in combined.items():
             if col in have:
                 continue
             conn.execute(insert(db.column_maps).values(
                 vendor="blast", source_column=col, metric_key=key,
-                unit=unit, scale=1.0, confirmed_by="seed",
+                unit=unit, scale=scale, confirmed_by="seed",
                 confirmed_at=func.now()))
             added += 1
     return added
+
+
+def learn_blast_user_ids(engine, pairs, dry_run=False):
+    """Record the Blast CSV's `user_id` for players an export resolved by name.
+
+    Two different Blast ID namespaces end up in player_vendor_ids under the vendor
+    'blast', and that is deliberate:
+
+      * 287042-460520   the 2024 R puller's `insights/{id}` ids (BLAST_PLAYER_IDS)
+      * 810838+         the CSV export's `user_id` account ids
+
+    The ranges do not overlap, which is what makes sharing the vendor safe -- a
+    lookup can never match the wrong namespace. The guard below asserts that
+    rather than trusting it, because if Blast ever issues an insights id above
+    810838 this silently resolves an export row to the wrong player, and a wrong
+    player is exactly what this system promises never to do.
+
+    Learning the id matters because names are the fragile path: three players are
+    spelled differently in AWRE than in Blast, and 'Caleb Williams28' only
+    resolves because the name key happens to drop digits. Once the id is stored,
+    the name stops mattering for that player forever.
+    """
+    added, skipped = 0, []
+    with engine.begin() as conn:
+        have = {r.vendor_id for r in conn.execute(
+            select(db.player_vendor_ids.c.vendor_id).where(
+                db.player_vendor_ids.c.vendor == "blast"))}
+        legacy = {int(v) for v in have if str(v).isdigit()}
+        for player_id, user_id in pairs:
+            uid = str(user_id).strip()
+            if not uid or uid in have:
+                continue
+            if uid.isdigit() and legacy and int(uid) <= max(legacy, default=0)                     and int(uid) in legacy:
+                skipped.append(uid)          # namespace collision -- do not guess
+                continue
+            if dry_run:
+                added += 1
+                continue
+            conn.execute(insert(db.player_vendor_ids).values(
+                player_id=player_id, vendor="blast", vendor_id=uid))
+            have.add(uid)
+            added += 1
+    return added, skipped
 
 
 def status(engine):

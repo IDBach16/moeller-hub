@@ -245,6 +245,63 @@ def training_pitch_mix(engine, player_id):
     }
 
 
+def training_drill_mix(engine, player_id):
+    """What kind of swings he actually took recently vs before, as percentages.
+
+    The hitting twin of training_pitch_mix, and it earns its place the same way:
+    a change in what a hitter PRACTISES is a finding in its own right, and it is
+    invisible to change detection by design. Because every Blast metric is
+    compared within its own drill, a hitter who moves from 80% tee work to 80%
+    live reps fires nothing at all -- correctly, since none of his drills changed
+    -- and yet he is plainly doing something different, and a coach should know.
+
+    Reported separately from swing changes and never merged with them. "He is
+    taking live reps now instead of tee work" and "his tee bat speed is up" are
+    two different statements, and only the second is about his swing.
+    """
+    with engine.connect() as conn:
+        dates = [r[0] for r in conn.execute(
+            select(db.sessions.c.session_date).distinct()
+            .where((db.sessions.c.player_id == player_id) &
+                   (db.sessions.c.source.in_(("blast", "hittrax"))))
+            .order_by(db.sessions.c.session_date.desc()))]
+        if len(dates) < metrics.RECENT_SESSIONS + 1:
+            return None
+        recent, baseline = dates[:metrics.RECENT_SESSIONS], dates[metrics.RECENT_SESSIONS:]
+
+        def counts(window):
+            rows = conn.execute(
+                select(db.swings.c.context, func.count())
+                .select_from(db.swings.join(
+                    db.sessions, db.sessions.c.id == db.swings.c.session_id))
+                .where((db.swings.c.player_id == player_id) &
+                       (db.swings.c.metric_key == "bat_speed") &
+                       (db.sessions.c.session_date.in_(window)))
+                .group_by(db.swings.c.context)).all()
+            total = sum(n for _c, n in rows) or 1
+            return {(c or "untagged"): round(100.0 * n / total, 1) for c, n in rows}
+
+        # Inside the connection block -- counts() closes over `conn`.
+        now, before = counts(recent), counts(baseline)
+
+    label = lambda c: "Untagged" if c == "untagged" else metrics.split_label(c)
+    shifts = []
+    for c in sorted(set(now) | set(before)):
+        a, b = before.get(c, 0.0), now.get(c, 0.0)
+        if abs(b - a) >= MIX_SHIFT_PP:
+            shifts.append(f"{label(c)} {a}% -> {b}% of his swings "
+                          f"({'+' if b > a else ''}{round(b - a, 1)} pts)")
+    return {
+        "recent_window": f"last {len(recent)} sessions",
+        "recent": {label(k): f"{v}%" for k, v in now.items()},
+        "baseline": {label(k): f"{v}%" for k, v in before.items()},
+        "notable_shifts": shifts,
+        "note": ("Drill usage, NOT a swing change. Every Blast metric is compared "
+                 "within one drill, so a shift in the mix fires no finding -- which "
+                 "is why it is reported here instead."),
+    }
+
+
 def build_context(engine, player_id):
     """The compact context the model is given. No raw rows, ever.
 
@@ -300,6 +357,11 @@ def build_context(engine, player_id):
         mix = training_pitch_mix(engine, player_id)
         if mix:
             ctx["bullpen_pitch_mix"] = mix
+    # Not an else: a two-way player swings as well as throws, and his cage work is
+    # as much a part of his development picture as his bullpens.
+    drills = training_drill_mix(engine, player_id)
+    if drills:
+        ctx["cage_drill_mix"] = drills
 
     game = prof.get("game") or {}
     if game.get("pitching"):

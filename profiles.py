@@ -18,7 +18,7 @@ number is worse than no page at all.
 import threading
 import time
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import distinct, func, literal, select
 
 import db
 import metrics
@@ -113,17 +113,27 @@ AA_SCALE = (-10.0, 25.0)
 def hitter_cards(engine):
     """Per-hitter visual summary for the players grid, one pass over swings.
 
-    Empty today -- no Blast or HitTrax export has been ingested -- and that is
-    the point of building it now: the grid lights up by itself the morning the
-    first export lands, the same way the pitcher cards appeared when Rapsodo
-    loaded. Until then every hitter keeps the quiet card, which is honest.
+    ONE DRILL PER CARD. A card averaging a hitter's tee and live swings together
+    shows a number that belongs to neither -- and its sparkline is worse, because
+    a trend over mixed drills tracks the CAGE PLAN rather than the swing. A hitter
+    moving from tee work to live reps appears to gain 11 mph without changing
+    anything, and the grid is exactly where nobody reads the small print.
+
+    So each card reports the drill the hitter has the most swings in, and says
+    which one. Comparing two hitters then requires their labels to match, which is
+    the honest constraint -- it was always there, it was just hidden.
+
+    Untagged swings carry a card only when no tagged drill clears the floor: they
+    are real swings, and hiding a hitter because nobody tagged his session helps
+    no one. The label says what it is.
     """
     KEYS = ["bat_speed", "attack_angle", "on_plane_efficiency",
             "exit_velocity", "max_exit_velocity"]
     with engine.connect() as conn:
         rows = conn.execute(
             select(db.swings.c.player_id, db.sessions.c.session_date,
-                   db.swings.c.metric_key, db.swings.c.value)
+                   db.swings.c.metric_key, db.swings.c.value,
+                   db.swings.c.context)
             .select_from(db.swings.join(
                 db.sessions, db.sessions.c.id == db.swings.c.session_id))
             .where(db.swings.c.metric_key.in_(KEYS))
@@ -131,13 +141,33 @@ def hitter_cards(engine):
     if not rows:
         return {}
 
-    acc: dict[int, dict] = {}
+    # (player, drill) -> metrics. One drill is then chosen per player below.
+    by_ctx: dict[tuple, dict] = {}
     for r in rows:
-        p = acc.setdefault(r.player_id, {k: [] for k in KEYS})
+        p = by_ctx.setdefault((r.player_id, r.context), {k: [] for k in KEYS})
         p[r.metric_key].append(float(r.value))
         if r.metric_key == "bat_speed":
-            p.setdefault("_by_date", {}).setdefault(str(r.session_date), []) \
-             .append(float(r.value))
+            p.setdefault("_by_date", {}).setdefault(
+                str(r.session_date), []).append(float(r.value))
+
+    acc: dict[int, dict] = {}
+    chosen_ctx: dict[int, object] = {}
+    for (pid, ctx), d in by_ctx.items():
+        n = len(d["bat_speed"])
+        if n < 5:                       # a handful of swings isn't a profile
+            continue
+        cur = acc.get(pid)
+        if cur is not None:
+            # A tagged drill beats untagged however many swings untagged has: an
+            # untagged pile is a mix of drills, so its mean is a mix too.
+            cur_tagged = chosen_ctx.get(pid) is not None
+            new_tagged = ctx is not None
+            if cur_tagged and not new_tagged:
+                continue
+            if cur_tagged == new_tagged and len(cur["bat_speed"]) >= n:
+                continue
+        acc[pid] = d
+        chosen_ctx[pid] = ctx
 
     band = metrics.get("attack_angle").target_band or (5.0, 15.0)
     lo, hi = AA_SCALE
@@ -146,12 +176,13 @@ def hitter_cards(engine):
     out = {}
     for pid, d in acc.items():
         bs = d["bat_speed"]
-        if len(bs) < 5:                 # a handful of swings isn't a profile
-            continue
+        ctx = chosen_ctx.get(pid)
         card = {
             "bat": round(sum(bs) / len(bs), 1),
             "bat_max": round(max(bs), 1),
             "n_swings": len(bs),
+            "drill": ctx,
+            "drill_label": metrics.split_label(ctx) if ctx else "Untagged",
         }
         if d["attack_angle"]:
             aa = sum(d["attack_angle"]) / len(d["attack_angle"])
@@ -159,6 +190,9 @@ def hitter_cards(engine):
             card["aa_pct"] = pct(aa)
             card["aa_in_band"] = band[0] <= aa <= band[1]
             card["band_lo_pct"], card["band_hi_pct"] = pct(band[0]), pct(band[1])
+            # The raw edges too: the card's tooltip used to hardcode 5-15, which
+            # silently became a lie the moment the band was recalibrated.
+            card["band_lo"], card["band_hi"] = band[0], band[1]
         if d["on_plane_efficiency"]:
             card["ope"] = int(round(sum(d["on_plane_efficiency"])
                                     / len(d["on_plane_efficiency"])))
@@ -219,19 +253,29 @@ def _training(conn, player_id, side):
     swings over 12 sessions produces 12 rows here, not 900.
     """
     table = db.swings if side == "hitting" else db.pitch_metrics
+    # The hitting side splits by drill here for the same reason the pitching side
+    # never pools pitch types in the session log: a cage session that mixed tee and
+    # machine work has no meaningful single bat speed. One row per (session, drill)
+    # -- 18 of the first export's 126 player-days mixed two or more drills, and
+    # those days are exactly the ones a pooled average misrepresents.
+    split = table.c.context if side == "hitting" else literal(None)
+    grouping = [db.sessions.c.id, db.sessions.c.session_date,
+                db.sessions.c.session_type, db.sessions.c.source,
+                db.sessions.c.purpose, db.sessions.c.notes, table.c.metric_key]
+    if side == "hitting":
+        grouping.append(table.c.context)
     rows = conn.execute(
         select(db.sessions.c.id, db.sessions.c.session_date,
                db.sessions.c.session_type, db.sessions.c.source,
                db.sessions.c.purpose, db.sessions.c.notes,
                table.c.metric_key,
+               split.label("context"),
                func.count().label("n"),
                func.avg(table.c.value).label("mean"),
                func.max(table.c.value).label("max"))
         .select_from(db.sessions.join(table, table.c.session_id == db.sessions.c.id))
         .where(db.sessions.c.player_id == player_id)
-        .group_by(db.sessions.c.id, db.sessions.c.session_date,
-                  db.sessions.c.session_type, db.sessions.c.source,
-                  db.sessions.c.purpose, db.sessions.c.notes, table.c.metric_key)
+        .group_by(*grouping)
         .order_by(db.sessions.c.session_date.desc())).all()
 
     # Stored to be plotted, not trended: an average plate location is meaningless
@@ -243,9 +287,15 @@ def _training(conn, player_id, side):
     for r in rows:
         if r.metric_key in PLOT_ONLY:
             continue
-        s = sessions.setdefault(r.id, {
+        ctx = getattr(r, "context", None)
+        s = sessions.setdefault((r.id, ctx), {
             "id": r.id, "date": str(r.session_date), "type": r.session_type,
             "source": r.source, "purpose": r.purpose, "notes": r.notes,
+            "context": ctx,
+            # Untagged is named rather than blanked: a coach seeing "Untagged" next
+            # to a number knows why it drives no finding. A blank just looks broken.
+            "context_label": metrics.split_label(ctx) if ctx else (
+                "Untagged" if side == "hitting" else None),
             "metrics": {},
         })
         m = metrics.get(r.metric_key)
@@ -256,16 +306,41 @@ def _training(conn, player_id, side):
             "mean": round(float(r.mean), m.decimals if m else 2),
             "max": round(float(r.max), m.decimals if m else 2),
         }
-    ordered = sorted(sessions.values(), key=lambda s: s["date"], reverse=True)
+    ordered = sorted(sessions.values(),
+                     key=lambda s: (s["date"], s.get("context_label") or ""),
+                     reverse=True)
     keys = sorted({k for s in ordered for k in s["metrics"]})
     return ordered, keys
+
+
+def _by_date(sessions):
+    """[(date, [session-drill rows])], newest day first.
+
+    Untagged sorts last within a day: it is the row a coach can act on least, and
+    leading with it would imply it is the day's headline.
+    """
+    days = {}
+    for s in sessions:
+        days.setdefault(s["date"], []).append(s)
+    for rows in days.values():
+        rows.sort(key=lambda r: (r.get("context") is None,
+                                 r.get("context_label") or ""))
+    return sorted(days.items(), key=lambda kv: kv[0], reverse=True)
 
 
 def _status_tiles(conn, player_id, side, training):
     """The headline metric row. Values come from the most recent session that
     carried each metric; the baseline column stays empty until Phase D computes
-    one, and says so rather than showing the same number twice."""
-    baselines = {r.metric_key: r for r in conn.execute(
+    one, and says so rather than showing the same number twice.
+
+    Both halves are keyed on the SPLIT, not just the metric. A hitter's tee bat
+    speed and his live bat speed are 11 mph apart, and player_baselines holds one
+    row per drill -- so a tile that looked up the baseline by metric alone would
+    happily show today's tee number against last month's machine baseline and call
+    the difference a change. The tile names its drill for the same reason a
+    finding does.
+    """
+    baselines = {(r.metric_key, r.pitch_type or None): r for r in conn.execute(
         select(db.player_baselines)
         .where(db.player_baselines.c.player_id == player_id)
         .order_by(db.player_baselines.c.window_end.desc()))}
@@ -275,16 +350,19 @@ def _status_tiles(conn, player_id, side, training):
         latest = None
         for s in training:                      # training is newest-first
             if m.key in s["metrics"]:
-                latest = (s["date"], s["metrics"][m.key])
+                latest = (s["date"], s["metrics"][m.key], s.get("context"))
                 break
         if latest is None:
             continue
-        date, agg = latest
-        b = baselines.get(m.key)
+        date, agg, ctx = latest
+        b = baselines.get((m.key, ctx))
         delta = (agg["mean"] - float(b.mean)) if b and b.mean is not None else None
         tiles.append({
             "key": m.key, "label": m.label, "unit": m.unit,
             "value": agg["mean"], "n": agg["n"], "date": date,
+            "context": ctx,
+            "context_label": metrics.split_label(ctx) if ctx else (
+                "Untagged" if side == "hitting" else None),
             "baseline": round(float(b.mean), m.decimals) if b and b.mean is not None else None,
             "delta": round(delta, m.decimals) if delta is not None else None,
             "favorable": m.favorable(delta) if delta is not None else None,
@@ -305,7 +383,9 @@ def _changes(conn, player_id):
         # Name the pitch. "Horizontal break is up" reads as a fact about the
         # pitcher; "Fastball horizontal break is up" is the one a coach can act on.
         if row.pitch_type:
-            pitch = metrics.PITCH_TYPE_LABELS.get(row.pitch_type, row.pitch_type)
+            # Holds a pitch code on a pitching row, a drill context on a hitting
+            # one -- see db.player_baselines.pitch_type.
+            pitch = metrics.split_label(row.pitch_type)
             return f"{pitch} {base[0].lower()}{base[1:]}"
         return base
 
@@ -568,6 +648,12 @@ def profile(engine, slug):
         "status": tiles,
         "changes": changes,
         "training": all_sessions,
+        # The same rows grouped for the hitter session log: [(date, [drill, ...])],
+        # newest first. Grouped here rather than in Jinja because a template
+        # groupby would need the rows pre-sorted by date anyway, and the ordering
+        # rule (newest day first, drills alphabetical within a day, untagged last)
+        # is logic rather than markup.
+        "training_by_date": _by_date(all_sessions),
         "metric_keys": sorted(set(metric_keys) | set(other_keys)),
         "game": game,
         "official": official,
@@ -583,39 +669,110 @@ def profile(engine, slug):
     }
 
 
-def metric_series(engine, player_id, metric_key):
-    """Per-session series for one metric -- what a sparkline needs."""
+def metric_series(engine, player_id, metric_key, context=None, with_context=False):
+    """Per-session series for one metric -- what a sparkline needs.
+
+    For a context-specific hitting metric the series is taken WITHIN ONE DRILL,
+    because a line drawn across drills plots the cage plan rather than the swing:
+    a hitter moving from tee work to live reps climbs 11 mph without changing
+    anything, and a trend line is the most persuasive way to show something that
+    isn't happening. With no `context` given, the drill with the most swings is
+    used -- and `with_context=True` returns which one, so nothing presents a tee
+    trend as though it covered all his work.
+    """
     m = metrics.get(metric_key)
     side = "hitting" if (m and m.side == "hitting") else "pitching"
     table = db.swings if side == "hitting" else db.pitch_metrics
+    split = side == "hitting" and metrics.is_context_specific(metric_key)
+
     with engine.connect() as conn:
+        if split and context is None:
+            # Untagged is excluded from the pick: it is a mix of drills, so a
+            # trend through it is the very artefact this function avoids. It is
+            # still available by asking for it explicitly.
+            best = conn.execute(
+                select(table.c.context, func.count().label("n"))
+                .select_from(db.sessions.join(
+                    table, table.c.session_id == db.sessions.c.id))
+                .where((db.sessions.c.player_id == player_id) &
+                       (table.c.metric_key == metric_key) &
+                       (table.c.context.isnot(None)))
+                .group_by(table.c.context)
+                .order_by(func.count().desc())).first()
+            context = best.context if best else None
+
+        q = (select(db.sessions.c.session_date,
+                    func.count().label("n"),
+                    func.avg(table.c.value).label("mean"))
+             .select_from(db.sessions.join(
+                 table, table.c.session_id == db.sessions.c.id))
+             .where((db.sessions.c.player_id == player_id) &
+                    (table.c.metric_key == metric_key)))
+        if split and context is not None:
+            q = q.where(table.c.context == context)
         rows = conn.execute(
-            select(db.sessions.c.session_date,
-                   func.count().label("n"),
-                   func.avg(table.c.value).label("mean"))
-            .select_from(db.sessions.join(table, table.c.session_id == db.sessions.c.id))
-            .where((db.sessions.c.player_id == player_id) &
-                   (table.c.metric_key == metric_key))
-            .group_by(db.sessions.c.id, db.sessions.c.session_date)
-            .order_by(db.sessions.c.session_date)).all()
-    return [{"date": str(r.session_date), "n": r.n,
-             "mean": round(float(r.mean), m.decimals if m else 2)} for r in rows]
+            q.group_by(db.sessions.c.id, db.sessions.c.session_date)
+             .order_by(db.sessions.c.session_date)).all()
+
+    series = [{"date": str(r.session_date), "n": r.n,
+               "mean": round(float(r.mean), m.decimals if m else 2)} for r in rows]
+    if with_context:
+        return series, (context if split else None)
+    return series
 
 
 # ---------------------------------------------------------------------------
 # Team development
 # ---------------------------------------------------------------------------
 
+def _mover_score(events):
+    """Rank a player's open changes into one signed number.
+
+    Signed by the registry's `favorable` flag, never by the direction of the
+    number. Half this file's reason for existing is that "up" is not "good":
+    a rising walk rate and a rising fastball are both `direction == "up"`, and
+    ranking on the sign would put the pitcher who lost the zone at the top of
+    the most-improved board.
+
+    Magnitude is |effect_size| -- deltas are in the metric's own units and are
+    not comparable across metrics, so summing them would let one mph of velo
+    outvote a collapse in spin efficiency. Effect size is already
+    delta/baseline_sd, which is the unit-free version.
+
+    `favorable is None` (a metric with no polarity, or one we could not judge)
+    contributes 0 to the score. It is still counted and still listed -- it just
+    does not get to decide whether a player is improving.
+    """
+    score = 0.0
+    good = bad = neutral = 0
+    for e in events:
+        weight = abs(e["effect_size"] or 0.0)
+        if e["favorable"] is True:
+            score += weight
+            good += 1
+        elif e["favorable"] is False:
+            score -= weight
+            bad += 1
+        else:
+            neutral += 1
+    return {"score": round(score, 2), "good": good, "bad": bad,
+            "neutral": neutral, "n": len(events)}
+
+
 def team_overview(engine):
-    """The roster-wide view: what changed, who needs review, protocol gaps."""
+    """The roster-wide view: what changed, who moved most, protocol gaps."""
     with engine.connect() as conn:
+        # Every open change, not a 40-row window: the movers board ranks across
+        # all of them, and a date-ordered truncation would silently drop a
+        # player's worst finding and mis-rank him.
         recent_changes = conn.execute(
             select(db.change_events, db.players.c.slug, db.players.c.first_name,
-                   db.players.c.last_name)
+                   db.players.c.last_name, db.players.c.primary_pos,
+                   db.players.c.class_year, db.players.c.is_pitcher)
             .select_from(db.change_events.join(
                 db.players, db.change_events.c.player_id == db.players.c.id))
             .where(db.change_events.c.acknowledged == False)  # noqa: E712
-            .order_by(db.change_events.c.detected_on.desc()).limit(40)).all()
+            .order_by(db.change_events.c.detected_on.desc()).limit(400)).all()
 
         counts = {
             "players": conn.execute(select(func.count()).select_from(db.players)
@@ -646,17 +803,74 @@ def team_overview(engine):
     no_baseline = [p for p in people if p["id"] not in with_baseline]
     no_data = [p for p in people if p["id"] not in last_seen]
 
+    changes = [{
+        "id": r.id,
+        "player": f"{r.first_name} {r.last_name}", "slug": r.slug,
+        "player_id": r.player_id,
+        "metric_key": r.metric_key,
+        "label": (metrics.get(r.metric_key).label
+                  if metrics.get(r.metric_key) else r.metric_key),
+        # Findings must name the pitch: "horizontal break is up" reads as a fact
+        # about the pitcher, "slider horizontal break is up" is actionable.
+        # NULL/'' is a genuinely pooled metric (release point, hitting), not a
+        # missing value, so it is labelled rather than left blank.
+        "pitch_type": (r.pitch_type or "") or None,
+        "pos": r.primary_pos or "—",
+        "class_year": r.class_year,
+        "is_pitcher": bool(r.is_pitcher),
+        "detected_on": str(r.detected_on), "severity": r.severity,
+        "favorable": r.favorable, "summary": r.summary,
+        "direction": r.direction,
+        "effect_size": (round(r.effect_size, 2)
+                        if r.effect_size is not None else None),
+    } for r in recent_changes]
+
+    # ---- movers board -------------------------------------------------------
+    by_player = {}
+    for c in changes:
+        by_player.setdefault(c["player_id"], []).append(c)
+
+    movers = []
+    for pid, evs in by_player.items():
+        s = _mover_score(evs)
+        movers.append({
+            "player": evs[0]["player"], "slug": evs[0]["slug"],
+            "pos": evs[0]["pos"], "class_year": evs[0]["class_year"],
+            "top": max(evs, key=lambda e: abs(e["effect_size"] or 0.0))["summary"],
+            **s,
+        })
+    movers.sort(key=lambda m: m["score"], reverse=True)
+
+    # A player whose open changes net to exactly zero belongs on neither board.
+    # Listing him under "most improved" with +0.0 is the kind of thing that
+    # makes a coach stop trusting the page.
+    improved = [m for m in movers if m["score"] > 0][:8]
+    declined = [m for m in reversed(movers) if m["score"] < 0][:8]
+
     return {
         "counts": counts,
-        "changes": [{
-            "id": r.id,
-            "player": f"{r.first_name} {r.last_name}", "slug": r.slug,
-            "metric_key": r.metric_key,
-            "label": (metrics.get(r.metric_key).label
-                      if metrics.get(r.metric_key) else r.metric_key),
-            "detected_on": str(r.detected_on), "severity": r.severity,
-            "favorable": r.favorable, "summary": r.summary,
-        } for r in recent_changes],
+        "changes": changes,
+        "movers": {"improved": improved, "declined": declined,
+                   "ranked": len(movers),
+                   # How many findings carry a polarity at all. Metrics like
+                   # horizontal break and release side deliberately have none --
+                   # more break is not automatically better and a slot move is
+                   # neither good nor bad without context -- so a feed made
+                   # entirely of those cannot be ranked. The page says that
+                   # rather than rendering two empty columns.
+                   "rated": sum(1 for c in changes
+                                if c["favorable"] is not None),
+                   "unrated": sum(1 for c in changes
+                                  if c["favorable"] is None)},
+        # Filter menus, built from what is actually in the feed rather than
+        # from the whole roster -- offering a position with no changes behind
+        # it just produces an empty list and looks broken.
+        "filters": {
+            "positions": sorted({c["pos"] for c in changes}),
+            "players": sorted({(c["player"], c["slug"]) for c in changes}),
+            "pitches": sorted({c["pitch_type"] for c in changes
+                               if c["pitch_type"]}),
+        },
         "no_baseline": no_baseline,
         "no_data": no_data,
         "roster": people,

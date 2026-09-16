@@ -207,6 +207,30 @@ a.pctyear:hover{color:var(--gold-light);background:rgba(255,255,255,.05)}
 .note-caveat{margin:.8rem 0 0;font-size:.78rem;font-style:italic;
   color:rgba(255,255,255,.5)}
 
+/* Drill context -- the hitting side's pitch-type badge. Deliberately quiet: it
+   is a qualifier on a number, not a status, so it must not out-shout the value. */
+.drill{display:inline-block;font-size:.66rem;font-weight:600;letter-spacing:.02em;
+  text-transform:uppercase;padding:.12rem .4rem;border-radius:4px;
+  background:rgba(197,160,89,.14);color:var(--gold);border:1px solid rgba(197,160,89,.28);
+  vertical-align:middle}
+.drill.untagged{background:rgba(148,148,148,.12);color:#8b8b8b;
+  border-color:rgba(148,148,148,.25);cursor:help}
+
+/* Per-drill percentile blocks. Stacked rather than tabbed: a coach comparing a
+   hitter's tee work against his live work needs both on screen at once, which
+   is the entire point of splitting them. */
+.pctdrills{display:grid;gap:1.1rem}
+.pctdrillhead{display:flex;align-items:center;gap:.5rem;margin:.1rem 0 .55rem}
+.pctdrilln{font-size:.72rem;color:var(--muted)}
+.pctshown{display:flex;flex-wrap:wrap;gap:.4rem;margin:.2rem 0 .35rem}
+.pctchip{font-size:.72rem;color:var(--muted);background:rgba(255,255,255,.035);
+  border:1px solid rgba(255,255,255,.07);border-radius:5px;padding:.2rem .45rem}
+.pctchip b{color:rgba(255,255,255,.8);font-weight:600;margin-left:.25rem}
+.pctchip small{opacity:.6;margin-left:.08rem}
+.pctwhy{font-size:.72rem;color:var(--muted);margin:0 0 .2rem;font-style:italic}
+.pctmix{margin:-.2rem 0 .8rem;max-width:64ch}
+.pctmixlist{display:block;opacity:.75;margin-top:.15rem}
+
 /* session log */
 .src{display:block;font-size:.64rem;color:rgba(255,255,255,.32);
   letter-spacing:.04em}
@@ -440,7 +464,7 @@ td.strong{color:var(--white);font-weight:700}
      against the arms he is measured with. Both are needed and neither
      substitutes for the other. One strip per pitch -- pooling a fastball's
      15" of ride with a slider's 2" would rank neither. #}
-  {% if strips or game_strip or game_bat %}
+  {% if strips or game_strip or game_bat or blast %}
   <section class="panel">
     <h2>Where he ranks</h2>
     <p class="hint">Against his own teammates &mdash; not against high school
@@ -555,6 +579,79 @@ td.strong{color:var(--white);font-weight:700}
     {% endfor %}
     </div>
     {% endif %}
+
+    {# ---- In the cage. One block per DRILL, because a tee swing and a live
+       swing are different measurements -- the same rule the bullpen block
+       above follows for pitch types. JJ Skeldon ranks 20th on tee bat speed
+       and 88th in general practice; a single blended strip would have shown
+       neither number and implied a hitter who doesn't exist. ---- #}
+    {# ---- In the cage. ONE strip, drill-adjusted -- NOT one per drill. The
+       drill effect on bat speed is about 3 mph end to end (soft toss +1.0,
+       tee -2.0), estimated within-player so the roster mix can't fake it,
+       while a per-drill field is only 5-10 hitters. Splitting bought a small
+       correction and paid a coarse rank for it -- Shane Green ranked "0th of
+       5". Per-drill numbers are still on this page: the status tiles and the
+       session log are both per drill, because there he is being compared to
+       himself, which is the case where the split is mandatory. ---- #}
+    {% if blast %}
+    <div class="pctblock">
+      <div class="pcthead">
+        <span class="pctwhat">In the cage &mdash; Blast</span>
+        <span class="pctyears"><span class="pctyear on">{{ blast.swings }} swings</span></span>
+      </div>
+      {% if blast.drills %}
+      <p class="hint pctmix">
+        {%- if blast.adjusted %}Adjusted for drill, then ranked against all
+          {{ blast.bars[0].pool_n }} hitters &mdash; a tee swing reads about 2 mph
+          slower than a live one for everybody, so the offset is taken out rather
+          than each hitter being ranked only against the few who did the same
+          drill.{% else %}Ranked on his raw averages: too few hitters work in more
+          than one drill to estimate the drill offset yet.{% endif %}
+        <span class="pctmixlist">From
+          {% for d in blast.drills %}{{ d.drill|lower }} {{ d.n }}{{ ', ' if not loop.last }}{% endfor %}.</span>
+      </p>
+      {% endif %}
+      {% set ranked = blast.bars|rejectattr('no_rank')|list %}
+      {% set unranked = blast.bars|selectattr('no_rank')|list %}
+      {% if ranked %}
+      <div class="pctgrid">
+        {% for b in ranked %}
+        <div class="pctbar">
+          <div class="pctrow">
+            <span class="pctlab">{{ b.label }}{% if b.lower_better %}<span class="lowb" title="Lower is better">&darr;</span>{% endif %}
+              {%- if b.blurb %}<span class="pctblurb">{{ b.blurb }}</span>{% endif %}</span>
+            <span class="pctval">{{ b.display }}<small>{{ b.unit }}</small></span>
+          </div>
+          <div class="pcttrack">
+            <div class="pctfill" style="width:{{ b.pct }}%"></div>
+            <div class="pctdot" style="left:{{ b.pct }}%"></div>
+          </div>
+          <div class="pctnum">{{ b.ord }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if unranked %}
+      <div class="pctshown">
+        {% for b in unranked %}
+        <span class="pctchip" title="{{ b.blurb }}">{{ b.label }}
+          <b>{{ b.display }}<small>{{ b.unit }}</small></b></span>
+        {% endfor %}
+      </div>
+      <p class="pctwhy">
+        {%- set short = unranked|selectattr('small')|list -%}
+        {%- if short %}Not ranked &mdash; too few swings in any one drill yet
+          ({{ short[0].n }} of {{ short[0].need }}).
+        {%- else %}Measured, not ranked &mdash; these are target bands or have no
+          better end, and a percentile would imply one.{% endif %}</p>
+      {% endif %}
+      {% if blast.thin %}
+      <p class="hint pctthin">Too few swings to show:
+        {% for t in blast.thin %}{{ t.label }} ({{ t.n }} of {{ t.need }})
+        {{- ', ' if not loop.last }}{% endfor %}.</p>
+      {% endif %}
+    </div>
+    {% endif %}
   </section>
   {% endif %}
 
@@ -562,11 +659,14 @@ td.strong{color:var(--white);font-weight:700}
   {% if p.status %}
   <section class="panel">
     <h2>Current status</h2>
-    <p class="hint">Most recent session for each headline metric, against this player's own baseline.</p>
+    <p class="hint">Most recent session for each headline metric, against this player's own baseline
+      {%- if not p.player.is_pitcher %} in the same drill &mdash; a tee number is only
+      comparable with other tee numbers{% endif %}.</p>
     <div class="tiles">
       {% for t in p.status %}
       <div class="tile">
-        <div class="lbl">{{ t.label }}</div>
+        <div class="lbl">{{ t.label }}
+          {%- if t.context_label %} <span class="drill">{{ t.context_label }}</span>{% endif %}</div>
         <div class="val">{{ t.value }}<span class="u">{{ t.unit }}</span></div>
         {% if t.delta is not none %}
           <div class="cmp {{ 'good' if t.favorable else ('bad' if t.favorable is false else '') }}">
@@ -715,7 +815,8 @@ td.strong{color:var(--white);font-weight:700}
       <p class="hint">
         {%- if p.player.is_pitcher %}Each bullpen, each pitch he threw in it &mdash;
         session averages per pitch type, never pooled across them.{% else %}Blast
-        and HitTrax sessions, session averages.{% endif %}
+        and HitTrax sessions, averaged per drill and never pooled across them &mdash;
+        tee and live swings are different measurements.{% endif %}
       </p>
       {% if p.training %}
       <div class="scroll">
@@ -762,20 +863,42 @@ td.strong{color:var(--white);font-weight:700}
           </tbody>
         </table>
         {% else %}
-        {# Hitters (Blast/HitTrax, when it lands): compact chips, not a blob. #}
+        {# Hitters: a date header, then ONE ROW PER DRILL under it -- the exact
+           shape the pitcher table above uses for pitch types, for the exact same
+           reason. A cage day that mixed tee and machine work has no single
+           meaningful bat speed, and a pooled row would hide an 11 mph gap.
+           Untagged rows are shown and labelled: they are real swings, they just
+           can't drive a finding. #}
         <table>
-          <thead><tr><th>Date</th><th>Type</th><th>Metrics</th></tr></thead>
+          <thead><tr><th>Drill</th><th>N</th><th>Bat</th><th>Att</th>
+            <th>OPE</th><th>Rot</th><th>VBA</th><th>TTC</th></tr></thead>
           <tbody>
-            {% for s in p.training[:15] %}
-            <tr>
-              <td class="mono">{{ s.date }}</td>
-              <td>{{ s.type.replace('_',' ')|title }}<small class="src">{{ s.source }}</small></td>
-              <td><div class="mchips">
-                {% for k, m in s.metrics.items() %}
-                <span class="mchip">{{ m.label }} <b>{{ m.mean }}{{ m.unit }}</b> <i>n={{ m.n }}</i></span>
-                {% endfor %}
-              </div></td>
+            {% for date, drills in p.training_by_date[:10] %}
+            <tr class="sess">
+              <td colspan="8">
+                <span class="mono">{{ date }}</span>
+                &middot; {{ drills[0].type.replace('_',' ')|title }}
+                <span class="src-inline">{{ drills[0].source }}</span>
+                {% if drills|length > 1 %}
+                <span class="sess-tot">{{ drills|length }} drills</span>{% endif %}
+              </td>
             </tr>
+            {% for s in drills %}
+            {% set m = s.metrics %}
+            <tr>
+              <td>
+                {% if s.context %}<span class="drill">{{ s.context_label }}</span>
+                {% else %}<span class="drill untagged" title="No Environment Tag in the Blast export. These swings are stored and shown, but they drive no change detection — an untagged swing can't be compared drill to drill. Fixed by tagging in the Blast app.">Untagged</span>{% endif %}
+              </td>
+              <td class="mono">{{ m.bat_speed.n if m.bat_speed else '—' }}</td>
+              <td class="mono strong">{{ m.bat_speed.mean if m.bat_speed else '—' }}</td>
+              <td class="mono">{{ m.attack_angle.mean if m.attack_angle else '—' }}</td>
+              <td class="mono">{{ m.on_plane_efficiency.mean if m.on_plane_efficiency else '—' }}</td>
+              <td class="mono">{{ m.rotational_acceleration.mean if m.rotational_acceleration else '—' }}</td>
+              <td class="mono">{{ m.vertical_bat_angle.mean if m.vertical_bat_angle else '—' }}</td>
+              <td class="mono">{{ m.time_to_contact.mean if m.time_to_contact else '—' }}</td>
+            </tr>
+            {% endfor %}
             {% endfor %}
           </tbody>
         </table>

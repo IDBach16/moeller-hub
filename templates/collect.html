@@ -110,7 +110,10 @@
   </section>
 
   <!-- ============ NAME REVIEW ============ -->
-  <section class="panel">
+  {# id="review" is the landing target for the Team Development page's "Names to
+     review" counter. /collect is off the nav, so that counter is the only way
+     into this queue -- don't rename the anchor without fixing team.html. #}
+  <section class="panel" id="review">
     <h2>3 &middot; Names needing review <span class="muted">({{ reviews|length }})</span></h2>
     <p class="hint">
       Export names that didn't resolve to a Moeller Player ID. Accepting one writes an
@@ -285,6 +288,11 @@ function showStats(s){
   if(s.rows_unresolved_player) lines.push(`rows with an unknown player   ${s.rows_unresolved_player}  (${s.names_queued} name(s) queued for review)`);
   if(s.rows_no_date) lines.push(`rows with an unreadable date  ${s.rows_no_date}`);
   if(s.unknown_pitch_types) lines.push(`pitches with an unmapped type ${s.unknown_pitch_types}`);
+  // Untagged swings are a coach-process problem, not an import error, so the line
+  // says what to do about it. They are stored and shown -- they just can't be
+  // compared drill to drill, so they drive no change detection.
+  if(s.untagged_swings) lines.push(`swings with no drill tag       ${s.untagged_swings}  (stored and shown, but they drive no change detection -- set the Environment Tag in the Blast app so these count)`);
+  if(s.rows_filtered) lines.push(`rows dropped                  ${s.rows_filtered}  (${s.filtered_by || 'filtered'})`);
   if(s.synthesized_session_refs) lines.push(`sessions grouped by (player, date) because the export carried no session id: ${s.synthesized_session_refs}`);
   mapResult.textContent = lines.join('\n');
 }

@@ -432,15 +432,23 @@ def tool_metric_history(player, metric_key):
         return {"error": f"'{metric_key}' is not a tracked metric",
                 "available": sorted(M.REGISTRY)}
     m = M.get(metric_key)
-    series = profiles.metric_series(_engine(), row.id, metric_key)
+    # with_context: a hitting series covers ONE drill, and the model must be told
+    # which, or it will describe a tee trend as though it were the whole picture.
+    series, ctx = profiles.metric_series(_engine(), row.id, metric_key,
+                                         with_context=True)
     if not series:
         return {"player": f"{row.first_name} {row.last_name}", "metric": m.label,
                 "sessions": [], "note": "no sessions with this metric"}
-    return {"player": f"{row.first_name} {row.last_name}",
-            "metric": m.label, "unit": m.unit,
-            "higher_is_better": m.polarity,
-            "target_band": list(m.target_band) if m.target_band else None,
-            "sessions": series[-20:]}
+    out = {"player": f"{row.first_name} {row.last_name}",
+           "metric": m.label, "unit": m.unit,
+           "higher_is_better": m.polarity,
+           "target_band": list(m.target_band) if m.target_band else None,
+           "sessions": series[-20:]}
+    if ctx:
+        out["drill"] = M.split_label(ctx)
+        out["scope"] = (f"{M.split_label(ctx)} swings only -- drills are not "
+                        f"comparable with each other")
+    return out
 
 
 def tool_compare_windows(player, metric_key, recent_sessions=3, baseline_days=120,
@@ -475,10 +483,18 @@ def tool_compare_windows(player, metric_key, recent_sessions=3, baseline_days=12
     v["player"] = f"{row.first_name} {row.last_name}"
     if resolved:
         v["pitch_type"] = resolved
-        v["scope"] = f"{M.PITCH_TYPE_LABELS.get(resolved, resolved)} only"
+        # split_label: `resolved` is a drill context for a hitting metric.
+        v["scope"] = f"{M.split_label(resolved)} only"
         if pitch_type is None:
-            v["note"] = (f"{metric_key} is pitch-specific; showing his most-thrown "
-                         f"pitch ({resolved}). Pass pitch_type for another.")
+            if M.is_context_specific(metric_key):
+                v["note"] = (f"{metric_key} is drill-specific; showing his most-swung "
+                             f"drill ({M.split_label(resolved)}). Drills are not "
+                             f"comparable with each other -- a tee number and a live "
+                             f"number differ by more than any swing change. Pass "
+                             f"pitch_type for another drill.")
+            else:
+                v["note"] = (f"{metric_key} is pitch-specific; showing his most-thrown "
+                             f"pitch ({resolved}). Pass pitch_type for another.")
     return v
 
 
@@ -1477,6 +1493,23 @@ Player development — training sessions, detected changes, goals and interventi
   nothing about command, so never present it as command.
 - These read a connected history of Blast / HitTrax / Rapsodo sessions per player.
 - This data is NEW and may be thin or empty. That is expected, not an error.
+
+BLAST SWING DATA IS PER DRILL. NEVER POOL IT.
+Every Blast swing carries the drill it came from -- Tee, Soft toss, Pitching machine,
+Live pitching, General practice -- and the drill moves the numbers far more than any
+swing change does. One of our hitters averages 53 mph off a tee and 64 mph in live
+work; the threshold for calling bat speed changed is 1.5 mph. So:
+- A hitting number is only meaningful next to its drill. Say which drill you mean:
+  "his tee bat speed is up", never "his bat speed is up".
+- NEVER compare one drill against another, or average across them, and never compare
+  two hitters unless the drills match. If a coach asks a question that would require
+  it, say plainly that tee and live swings are different measurements.
+- Some swings are UNTAGGED because nobody set the Environment Tag in the Blast app.
+  They are real swings and they are stored, but they support no comparison and drive
+  no finding. If a hitter's data is mostly untagged, say so -- that is a useful thing
+  for a coach to hear, and the fix is tagging in the app, not anything you can do.
+This is the hitting-side version of the pitch-type rule above, and it exists because
+the same mistake on the pitching side produced three confident, wrong findings.
 
 Game performance — how it actually played out in competition:
 - season_pitching / season_batting (19,560 tracked AWRE pitches, 2024-2026),

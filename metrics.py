@@ -101,8 +101,19 @@ _PITCHING = [
 # ---------------------------------------------------------------------------
 #
 # Blast keys come straight from the 2024 R puller -- see BLAST_COLUMNS below.
-# The two target bands are the placeholders most likely to be wrong; calibrate
-# them on our own hitters before anyone reads them as gospel.
+# The CSV export spells them differently again; see BLAST_CSV_COLUMNS.
+#
+# TARGET BANDS ARE CALIBRATED TO OUR OWN HITTERS (Ian's call, 2026-09-16), from
+# the 7,198-swing Blast export: the interquartile range of PLAYER MEANS over
+# tagged swings only. Player means rather than swing means so one hitter with
+# 1,320 swings doesn't set the band for the team; tagged only because untagged
+# swings are a mix of drills (see SWING_CONTEXTS).
+#
+# ** Read the caveat before quoting these to anyone. ** A band calibrated on our
+# own distribution says "typical for Moeller", NOT "good". It cannot tell us the
+# team is collectively short in a metric, because the middle of whatever we do is
+# always in band by construction. It is a useful relative marker and a bad
+# absolute one. Replace with an external benchmark when we have one worth trusting.
 
 _HITTING = [
     Metric("bat_speed", "Bat speed", "mph", "hitting", HIGHER_BETTER,
@@ -110,17 +121,22 @@ _HITTING = [
     Metric("peak_hand_speed", "Peak hand speed", "mph", "hitting", HIGHER_BETTER,
            mmc=1.0, min_n=20, sources=("blast",)),
     Metric("attack_angle", "Attack angle", "deg", "hitting", TARGET_BAND,
-           mmc=2.0, min_n=20, sources=("blast",), target_band=(5.0, 15.0), headline=True),
+           mmc=2.0, min_n=20, sources=("blast",), target_band=(6.0, 11.0), headline=True),
     Metric("vertical_bat_angle", "Vertical bat angle", "deg", "hitting", TARGET_BAND,
-           mmc=2.0, min_n=20, sources=("blast",), target_band=(-40.0, -25.0)),
+           mmc=2.0, min_n=20, sources=("blast",), target_band=(-33.0, -26.0)),
     Metric("on_plane_efficiency", "On-plane efficiency", "%", "hitting", HIGHER_BETTER,
            mmc=5.0, min_n=20, sources=("blast",), headline=True),
     Metric("rotational_acceleration", "Rotational acceleration", "g", "hitting", HIGHER_BETTER,
            mmc=1.0, min_n=20, sources=("blast",)),
     Metric("early_connection", "Early connection", "deg", "hitting", TARGET_BAND,
-           mmc=3.0, min_n=20, sources=("blast",), target_band=(80.0, 100.0)),
+           mmc=3.0, min_n=20, sources=("blast",), target_band=(96.0, 105.0)),
     Metric("connection_at_impact", "Connection at impact", "deg", "hitting", TARGET_BAND,
-           mmc=3.0, min_n=20, sources=("blast",), target_band=(80.0, 100.0)),
+           mmc=3.0, min_n=20, sources=("blast",), target_band=(83.0, 88.0)),
+    # In the CSV export but NOT in the 2024 API puller, which is why it was missing
+    # from this registry until the first real export landed. Neutral polarity: we
+    # have no defensible direction for it, and a target band would be inventing one.
+    Metric("hinge_angle", "Hinge angle at impact", "deg", "hitting", NEUTRAL,
+           mmc=3.0, min_n=20, sources=("blast",)),
     Metric("body_rotation", "Body rotation", "%", "hitting", NEUTRAL,
            mmc=5.0, min_n=20, sources=("blast",)),
     Metric("body_tilt", "Body tilt", "deg", "hitting", NEUTRAL,
@@ -179,6 +195,115 @@ PITCH_SPECIFIC = {
 def is_pitch_specific(key):
     """True if this metric must be compared within a single pitch type."""
     return key in PITCH_SPECIFIC
+
+
+# ---------------------------------------------------------------------------
+# Swing context -- the hitting side's pitch type
+# ---------------------------------------------------------------------------
+# Blast tags every swing with the drill it came from, and the drill moves the
+# numbers more than any swing change will. This is the same trap PITCH_SPECIFIC
+# exists for, on the other side of the ball: a metric pooled across drills moves
+# whenever the hitter's DRILL MIX moves, even though his swing did not.
+#
+# Measured on the first real export (2026-09-16, 7,198 swings, 26 hitters), as the
+# gap between a player's own per-drill means:
+#
+#   JJ Skeldon      bat speed   tee 53.06  vs  general practice 64.37   = 11.3 mph
+#   Andy Bennett    on-plane    tee 56.7%  vs  soft toss        68.1%   = 11.4 pts
+#   Shane Green     bat speed   machine 57.32 vs soft toss      61.97   =  4.7 mph
+#
+# bat_speed's minimum meaningful change is 1.5 mph. An 11.3 mph drill artefact is
+# seven times the threshold -- it would fire as SIGNIFICANT every time a hitter's
+# cage work shifted from tee to live, and the AI would then explain the decline.
+#
+# So: EVERY Blast metric is context-specific. This is the honest reading of the
+# measurement -- of thirteen metrics, ten moved by more than their own mmc between
+# drills for at least a quarter of hitters, and the three that didn't
+# (time_to_contact, commit_time, connection_at_impact) are the ones where a tee
+# swing has no defensible value anyway: there is no pitch to commit to.
+#
+# This differs from the pitching side, where release point is deliberately POOLED
+# because slot is a property of the delivery rather than of a pitch. There is no
+# hitting equivalent -- no Blast metric is measured independently of the drill.
+
+SWING_CONTEXTS = ["tee", "soft_toss", "machine", "live", "practice"]
+
+SWING_CONTEXT_LABELS = {
+    "tee": "Tee",
+    "soft_toss": "Soft toss",
+    "machine": "Pitching machine",
+    "live": "Live pitching",
+    "practice": "General practice",
+}
+
+_CONTEXT_ALIASES = {
+    # Left of the colon is ours; the right is every spelling the Blast export has
+    # actually produced. "soft toss underhand" and "soft toss overhand" collapse
+    # together: they are the same drill and splitting them would halve already-thin
+    # samples for no gain. Revisit if a coach says the two differ for our hitters.
+    "tee": ["tee", "off tee", "off the tee", "tee work"],
+    "soft_toss": ["soft toss", "soft toss underhand", "soft toss overhand",
+                  "front toss", "flips"],
+    "machine": ["pitching machine", "machine", "iron mike"],
+    "live": ["live pitch", "live pitching", "live at bats", "live abs", "live bp"],
+    "practice": ["general practice", "practice", "batting practice", "bp"],
+}
+
+_CONTEXT_LOOKUP = {alias: code
+                   for code, aliases in _CONTEXT_ALIASES.items()
+                   for alias in aliases}
+
+
+def normalize_context(raw):
+    """Blast's Environment Tag -> one of SWING_CONTEXTS, or None.
+
+    None is the right answer for an untagged swing and is NOT a failure. 1,466 of
+    the first export's 7,198 swings (20%) carry no tag, because tagging is a
+    coach-behaviour thing in the Blast app and nobody was doing it consistently.
+
+    An untagged swing is stored and shown, but contributes to NO context's
+    baseline -- exactly as an unlabelled pitch contributes to no pitch type. We
+    cannot know which drill it was, and folding it into a real one would corrupt
+    that drill's baseline with a mix. The fix is charting discipline in the app,
+    not a guess here.
+    """
+    if raw is None:
+        return None
+    key = str(raw).strip().lower()
+    if not key or key in ("nan", "none", "null"):
+        return None
+    if key in SWING_CONTEXTS:
+        return key
+    return _CONTEXT_LOOKUP.get(key)
+
+
+# Which hitting metrics may not be pooled across drills. This is every Blast
+# metric, deliberately -- see the measurement in the SWING_CONTEXTS note above.
+# Built from the registry rather than typed out so a metric added later is
+# context-split by default; opting one OUT is the decision that should require
+# an edit here, because pooling is the failure mode.
+CONTEXT_SPECIFIC = {m.key for m in REGISTRY.values()
+                    if m.side == "hitting" and "blast" in m.sources}
+
+
+def is_context_specific(key):
+    """True if this metric must be compared within a single drill context."""
+    return key in CONTEXT_SPECIFIC
+
+
+def split_label(code):
+    """Render whichever split dimension a finding carries.
+
+    `change_events.pitch_type` and `player_baselines.pitch_type` hold a PITCH code
+    for pitching rows and a SWING CONTEXT code for hitting rows -- one column, two
+    vocabularies, because the two sides never share a row and a second column
+    would put a NULL in every composite key. See the note on db.swings.context.
+    """
+    if not code:
+        return None
+    return (PITCH_TYPE_LABELS.get(code)
+            or SWING_CONTEXT_LABELS.get(code)
+            or str(code))
 
 
 def get(key):
@@ -279,6 +404,69 @@ BLAST_COLUMNS = {
     "player_id":                     ("vendor_id", None),
     "player_name":                   ("player", None),
 }
+
+
+# ---------------------------------------------------------------------------
+# Blast CSV export column map
+# ---------------------------------------------------------------------------
+# BLAST_COLUMNS above is the API schema, recovered from the 2024 R puller. The
+# "All swings by player" CSV export from Blast Connect is a DIFFERENT schema with
+# different names, and mapping one file with the other's keys silently produces an
+# import where every metric column is unmapped and the commit writes nothing.
+#
+# Three things in here are load-bearing:
+#
+#  1. ** On Plane Efficiency ships as a FRACTION despite the (%) in its header. **
+#     Values run 0.29-1.00, not 29-100. Its scale is 100. Without that, on-plane
+#     efficiency enters the database around 0.7, its mmc of 5.0 is never cleared
+#     by anything, and the metric silently never fires a finding for anyone. It
+#     looks like "nothing changed", which is the worst possible failure mode --
+#     an empty change list is a legitimate result, so nothing looks wrong.
+#
+#  2. The export splits the name over first_name + last_name, so there is no one
+#     "player" column. Hence the player_first / player_last roles -- see
+#     db.COLUMN_ROLES.
+#
+#  3. Hinge Angle at Impact exists here and NOT in the API puller; body_rotation
+#     and on_plane_pct are the reverse. Both registries are right about their own
+#     source. Do not "reconcile" them.
+#
+# A trailing scale of None means 1.0. The third slot is the structural role or
+# None for an ordinary metric.
+
+BLAST_CSV_COLUMNS = {
+    # structural roles
+    "Swing Timestamp":                  ("date", None, 1.0),
+    "user_id":                          ("vendor_id", None, 1.0),
+    "first_name":                       ("player_first", None, 1.0),
+    "last_name":                        ("player_last", None, 1.0),
+    "Environment Tag":                  ("context", None, 1.0),
+    "captureid":                        ("ignore", None, 1.0),
+    "timezone":                         ("ignore", None, 1.0),
+    "Bat Nickname":                     ("ignore", None, 1.0),
+    "sensorserialnumber":               ("ignore", None, 1.0),
+    "Upload Timestamp":                 ("ignore", None, 1.0),
+    "actiontype":                       ("ignore", None, 1.0),
+    # metrics
+    "Bat Speed (MPH)":                  ("bat_speed", "mph", 1.0),
+    "Peak Hand Speed (MPH)":            ("peak_hand_speed", "mph", 1.0),
+    "Rotational Acceleration (G's)":    ("rotational_acceleration", "g", 1.0),
+    "Power (kW)":                       ("power", "kW", 1.0),
+    # the fraction -> percent conversion described above
+    "On Plane Efficiency (%)":          ("on_plane_efficiency", "%", 100.0),
+    "Attack Angle (°'s)":             ("attack_angle", "deg", 1.0),
+    "Vert. Bat Angle (°'s)":          ("vertical_bat_angle", "deg", 1.0),
+    "Time to Contact (s)":              ("time_to_contact", "s", 1.0),
+    "Commit Time (s)":                  ("commit_time", "s", 1.0),
+    "Early Connection (°'s)":         ("early_connection", "deg", 1.0),
+    "Hinge Angle at Impact (°'s)":    ("hinge_angle", "deg", 1.0),
+    "Connection at Impact (°'s)":     ("connection_at_impact", "deg", 1.0),
+    "Body Tilt Angle (°'s)":          ("body_tilt", "deg", 1.0),
+}
+
+# Only swings. The export also carries 'air Swing' rows (22 of 7,198) -- a sensor
+# reading with no ball, which Blast itself excludes from a player's averages.
+BLAST_ACTION_TYPES = {"swing"}
 
 
 # ---------------------------------------------------------------------------

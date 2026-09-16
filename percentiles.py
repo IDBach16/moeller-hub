@@ -11,10 +11,12 @@ sees one per pitch type, because the question "is his slider any good" is a
 different question from "is his fastball any good".
 """
 import threading
+import time
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 import db
+import metrics
 import rapsodo_card
 
 # Tracked pitches of a type before it is ranked, or counted in anyone else's
@@ -692,3 +694,273 @@ def game_strip(name, side, year=None):
         return None
     return {"year": year, "years": years, "side": side, "bars": bars,
             "thin": thin, "total": mine.get("total", 0)}
+
+
+# ===========================================================================
+# Blast -- where a hitter's swing ranks in the cage
+# ===========================================================================
+#
+# WHY THE POPULATION IS MOELLER AND NOT "BLAST STANDARDS".
+# Blast does publish benchmark tables by level, and they are not in this repo.
+# Inventing plausible-looking ones would be worse than having none: a kid told
+# he is "below the high-school standard" against a number nobody sourced is
+# being told something untrue about himself, with authority. If real benchmarks
+# are obtained they belong here as a second, clearly-labelled pool -- not as a
+# replacement for this one. Ian's own 2024 Blast Shiny app ranked within Moeller
+# for the same reason.
+#
+# ---------------------------------------------------------------------------
+# DRILL IS ADJUSTED FOR, NOT SPLIT ON. THIS IS THE OPPOSITE OF changes.py, AND
+# DELIBERATELY SO -- read this before "fixing" either one to match the other.
+# ---------------------------------------------------------------------------
+# Change detection compares a hitter to HIMSELF over time, so his drill MIX is a
+# confound that moves his average without his swing changing. There the split is
+# mandatory and metrics.CONTEXT_SPECIFIC enforces it.
+#
+# A percentile compares him to OTHER HITTERS at one moment. Drill is then just an
+# offset, and an offset that applies to everybody cancels out of a ranking. The
+# question is only how big it is, and whether it reorders anyone.
+#
+# MEASURED, 2026-09-16, within-player so the roster mix cannot fake it (a drill's
+# raw mean is confounded by WHO does that drill -- if mostly weak hitters use the
+# tee, the tee mean is low for roster reasons and subtracting it over-corrects).
+# Two-way additive fit, player + drill, solved by alternating means:
+#
+#     bat speed      soft toss +1.00  practice +0.79  machine -0.98  tee -2.03
+#     rotational acc soft toss +1.27  practice +0.27  machine -1.23  tee -1.49
+#     on-plane eff   machine   +1.55  soft toss +0.89 tee      +0.21 practice -1.99
+#
+# About 3 mph end to end on bat speed. NOT the 11.3 mph gap that justifies the
+# split in changes.py -- that figure is one hitter's (JJ Skeldon's) own tee-vs-
+# live difference, and it turns out to be an outlier: the other four hitters
+# measured on both drills sit at +2.3, -1.3, +0.4 and +0.3. A single player's
+# spread is a real thing about HIM, which is exactly why change detection splits;
+# it is not the population-level drill effect, and using it as one was wrong.
+#
+# AND SPLITTING THE POOL COSTS MORE THAN IT BUYS. Per drill the fields are 10, 10,
+# 6 and 5 hitters. That produces ranks like Shane Green's "0th of 5" on the
+# machine, leaves Ricky Maschinot's 313 machine swings unrankable under MIN_POOL,
+# and hands every hitter two to four separate blocks instead of one answer. A
+# 5-man percentile is coarser than a 3 mph offset is large.
+#
+# So: estimate the drill effect, subtract it, and rank all 17 hitters in ONE
+# pool. Everybody gets a rank, the offset is removed properly, and the per-drill
+# numbers are still on the page -- the session log and the status tiles are both
+# per drill, because there they are comparing him to himself.
+
+BLAST_MIN_N = 25        # swings in ONE drill before that drill counts for him
+
+# A drill's effect can only be estimated from hitters who appear in more than one
+# of them. Below this many such hitters the estimate is guesswork, so the
+# adjustment is skipped entirely and said out loud rather than quietly applied.
+MIN_LINKED = 3
+
+# (metric key, label, unit, higher_better, min_n, blurb)
+# higher_better None = shown but never ranked. See the direction note below.
+BLAST_STRIP = [
+    ("bat_speed", "Bat speed", "mph", True, BLAST_MIN_N,
+     "how fast the barrel is moving"),
+    ("peak_hand_speed", "Hand speed", "mph", True, BLAST_MIN_N,
+     "how fast he gets the hands going"),
+    ("rotational_acceleration", "Rotational accel", "g", True, BLAST_MIN_N,
+     "how quickly the barrel turns"),
+    ("power", "Power", "kW", True, BLAST_MIN_N,
+     "bat speed and mass together"),
+    ("on_plane_efficiency", "On-plane efficiency", "%", True, BLAST_MIN_N,
+     "how much of the swing is on the pitch plane"),
+    ("time_to_contact", "Time to contact", "s", False, BLAST_MIN_N,
+     "trigger to impact"),
+    ("commit_time", "Commit time", "s", False, BLAST_MIN_N,
+     "how long he can wait before committing"),
+    # --- shown, never ranked: no good end ---
+    # Reliability is NOT why these are here; every one of them clears 0.60 (see
+    # blast/reliability.py). A percentile implies a good end and these have none.
+    # The four band metrics cannot be ranked by distance-from-band either: the
+    # bands are themselves calibrated on Moeller, so that would rank hitters by
+    # how average they are and print it as a grade.
+    ("attack_angle", "Attack angle", "deg", None, BLAST_MIN_N,
+     "target band, not a high score"),
+    ("vertical_bat_angle", "Vertical bat angle", "deg", None, BLAST_MIN_N,
+     "target band, not a high score"),
+    ("early_connection", "Early connection", "deg", None, BLAST_MIN_N,
+     "body-to-barrel at the start"),
+    ("connection_at_impact", "Connection at impact", "deg", None, BLAST_MIN_N,
+     "body-to-barrel at the ball"),
+    ("hinge_angle", "Hinge angle", "deg", None, BLAST_MIN_N,
+     "measured, but neither end of it is the good end"),
+    ("body_tilt", "Body tilt", "deg", None, BLAST_MIN_N,
+     "measured, but neither end of it is the good end"),
+]
+
+_blast_lock = threading.Lock()
+_blast_cache = {}
+# Same TTL profiles.py uses. A plain dict with no expiry would hold the field
+# from process start, so the morning's upload would not move anybody's
+# percentile until the next redeploy -- and nothing about the page would look
+# wrong, which is the failure mode worth spending six lines to avoid.
+_BLAST_TTL = 600  # seconds
+
+
+def _blast_table(engine):
+    """(player_id, drill) -> {metric: mean, metric_n: count}, whole roster.
+
+    One query for the team, cached, because every hitter's page needs the same
+    field to rank against and re-deriving it per view is how a page gets slow.
+    """
+    now = time.time()
+    with _blast_lock:
+        hit = _blast_cache.get("table")
+    if hit is not None and now - hit[0] < _BLAST_TTL:
+        return hit[1]
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(db.swings.c.player_id, db.swings.c.context,
+                   db.swings.c.metric_key,
+                   func.count().label("n"),
+                   func.avg(db.swings.c.value).label("mean"))
+            .where(db.swings.c.value.isnot(None))
+            # Untagged swings adjust nothing and rank nobody: that pile is a mix
+            # of drills, so neither its mean nor its offset belongs to any drill.
+            .where(db.swings.c.context.isnot(None))
+            .group_by(db.swings.c.player_id, db.swings.c.context,
+                      db.swings.c.metric_key)).all()
+
+    table = {}
+    for r in rows:
+        d = table.setdefault((r.player_id, r.context), {})
+        d[r.metric_key] = float(r.mean)
+        d[r.metric_key + "_n"] = int(r.n)
+    with _blast_lock:
+        _blast_cache["table"] = (now, table)
+    return table
+
+
+def clear_blast_cache():
+    with _blast_lock:
+        _blast_cache.clear()
+
+
+def _cells(table, key):
+    """{(player, drill): mean} for everyone over the sample floor on this metric."""
+    return {pd: t[key] for pd, t in table.items()
+            if t.get(key) is not None and (t.get(key + "_n") or 0) >= BLAST_MIN_N}
+
+
+def drill_effects(cells, iters=60):
+    """Additive drill offsets, identified from WITHIN-player contrasts only.
+
+    Fits value[p][d] ~ grand + player[p] + drill[d] by alternating means. Only
+    hitters measured in more than one drill carry information about the drill
+    term, which is the point: a drill's raw mean is confounded by who does it.
+
+    Returns (grand, {player: effect}, {drill: effect}, n_linked). `n_linked` is
+    how many hitters actually span two or more drills -- the caller refuses to
+    apply an adjustment that rests on fewer than MIN_LINKED of them.
+    """
+    if not cells:
+        return None, {}, {}, 0
+    players = sorted({p for p, _ in cells})
+    drills = sorted({d for _, d in cells})
+    by_player = {}
+    for (p, d) in cells:
+        by_player.setdefault(p, []).append(d)
+    n_linked = sum(1 for p in players if len(by_player[p]) > 1)
+
+    grand = sum(cells.values()) / len(cells)
+    pe = {p: 0.0 for p in players}
+    de = {d: 0.0 for d in drills}
+    for _ in range(iters):
+        for d in drills:
+            vs = [cells[(p, dd)] - grand - pe[p] for (p, dd) in cells if dd == d]
+            de[d] = sum(vs) / len(vs)
+        for p in players:
+            vs = [cells[(p, dd)] - grand - de[dd] for (pp, dd) in cells if pp == p]
+            pe[p] = sum(vs) / len(vs)
+    return grand, pe, de, n_linked
+
+
+def blast_strip(engine, player_id):
+    """One drill-adjusted strip for a hitter, against every hitter on the roster.
+
+    The value shown IS the value ranked -- his swing expressed at an average
+    drill. Showing a raw pooled average while ranking an adjusted one would let
+    two hitters appear in one order and rank in the other, which reads as a bug
+    and destroys trust in the whole panel.
+    """
+    table = _blast_table(engine)
+    mine_drills = {d: t for (p, d), t in table.items() if p == player_id}
+    if not mine_drills:
+        return None
+
+    bars, thin = [], []
+    adjusted_any = False
+    for key, label, unit, higher_better, min_n, blurb in BLAST_STRIP:
+        cells = _cells(table, key)
+        grand, pe, de, n_linked = drill_effects(cells)
+
+        # His own sample, across every drill that cleared the floor.
+        his = {d: t[key] for d, t in mine_drills.items()
+               if t.get(key) is not None}
+        n = sum(t.get(key + "_n") or 0 for t in mine_drills.values()
+                if t.get(key) is not None)
+        if not his:
+            continue
+
+        qualifies = (player_id in pe)
+        if not qualifies:
+            # Every drill of his is under the floor. Show the number, no rank.
+            val = sum(his.values()) / len(his)
+            if n >= _show_floor(min_n):
+                bars.append({"label": label, "value": round(val, 3),
+                             "display": metrics.format_value(key, val),
+                             "unit": unit, "blurb": blurb, "n": n,
+                             "pct": None, "ord": "", "pool_n": None,
+                             "no_rank": True, "small": True, "need": min_n})
+            else:
+                thin.append({"label": label, "value": round(val, 3),
+                             "display": metrics.format_value(key, val),
+                             "unit": unit, "n": n, "need": min_n})
+            continue
+
+        use_adj = n_linked >= MIN_LINKED
+        if use_adj:
+            adjusted_any = True
+            val = grand + pe[player_id]
+            pool = [grand + v for v in pe.values()]
+        else:
+            # Not enough hitters span two drills to identify the offset. Rank the
+            # raw means rather than apply a number we cannot estimate.
+            val = sum(his.values()) / len(his)
+            pool = list(cells.values())
+
+        bar = {"label": label, "value": round(val, 3),
+               "display": metrics.format_value(key, val), "unit": unit,
+               "blurb": blurb, "n": n, "pct": None, "ord": "",
+               "pool_n": len(pool), "adjusted": use_adj}
+
+        if higher_better is None:
+            bar["no_rank"] = True
+            bars.append(bar)
+            continue
+        if len(pool) < MIN_POOL:
+            bar.update(no_rank=True, pool_short=True)
+            bars.append(bar)
+            continue
+        pct = _pct(pool, val)
+        if pct is None:
+            continue
+        rank = pct if higher_better else 100 - pct
+        bar.update(pct=rank, ord=ordinal(rank), lower_better=not higher_better)
+        bars.append(bar)
+
+    if not bars and not thin:
+        return None
+
+    # What fed it, so the adjustment is visible rather than magic.
+    mix = sorted(((d, t.get("bat_speed_n") or 0) for d, t in mine_drills.items()),
+                 key=lambda kv: -kv[1])
+    return {"bars": bars, "thin": thin, "adjusted": adjusted_any,
+            "swings": sum(n for _d, n in mix),
+            "drills": [{"drill": metrics.split_label(d), "n": n}
+                       for d, n in mix if n]}

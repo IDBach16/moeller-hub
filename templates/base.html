@@ -364,6 +364,13 @@ tr:last-child td{border-bottom:none}
 .scroll{overflow-x:auto}
 .empty{color:rgba(255,255,255,.35);font-size:.86rem;padding:.8rem 0;line-height:1.7}
 
+/* Visible to a screen reader, not on screen. Used for <label>s on filter
+   controls whose purpose is obvious sighted but nameless otherwise. Clip
+   rather than display:none -- display:none removes it from the a11y tree too,
+   which defeats the point. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
 .pill{display:inline-block;padding:.2rem .6rem;border-radius:999px;font-size:.68rem;
   font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 .pill.ok{background:rgba(120,200,140,.15);color:#8fd9a4}
@@ -464,6 +471,15 @@ tr:last-child td{border-bottom:none}
 
 <footer class="footer">
   Moeller Baseball Analytics <span>|</span> @MoeAnalytics
+  {%- if gate_on %}
+  {# In the page footer, NOT .side-foot: that element is display:none below
+     1100px and the sidebar collapses to icons, so the shared dugout iPad --
+     the whole reason an exit matters, given session.permanent and a 30-day
+     lifetime -- is exactly the device that would never see the link.
+     Rendered only when HUB_PASSWORD is set: with the gate off /logout clears
+     an empty session and bounces to a /login that redirects straight back. #}
+  <span>|</span> <a href="/logout">Log out</a>
+  {%- endif %}
 </footer>
 </main>
 </div>

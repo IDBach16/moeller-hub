@@ -136,36 +136,49 @@ def welch(a, b):
 # ===========================================================================
 
 def _observations(conn, player_id):
-    """Every measurement for a player, as {(metric_key, pitch_type): [(date, session_id, value)]}.
+    """Every measurement for a player, as {(metric_key, split): [(date, session_id, value)]}.
 
-    `pitch_type` is None for metrics that are meaningfully pooled (release point,
-    everything on the hitting side) and the pitch code for those that are not.
-    Comparing a fastball's ride against a slider's is comparing two different
-    measurements, and the pooled average then moves whenever usage moves --
-    see metrics.PITCH_SPECIFIC for the case that made this necessary.
+    `split` is the dimension a metric may not be pooled across, and it carries two
+    vocabularies depending on the side:
+
+      pitching -- a pitch code (metrics.PITCH_SPECIFIC). Comparing a fastball's
+        ride against a slider's compares two different measurements, and the
+        pooled average then moves whenever USAGE moves. Release point is
+        deliberately pooled: slot is a property of the delivery, not of a pitch.
+
+      hitting -- a drill context (metrics.SWING_CONTEXTS). Same failure, other
+        side of the ball: pooled across drills, a hitter's numbers move whenever
+        his DRILL MIX moves. Measured on the first Blast export, JJ Skeldon's tee
+        bat speed is 11.3 mph below his live bat speed, against a 1.5 mph
+        detection threshold -- pooling him would fire a fake collapse every time
+        the cage plan changed. EVERY Blast metric is context-specific; there is no
+        hitting analogue of release point.
+
+    None = pooled. An unlabelled pitch or an untagged swing contributes to
+    NOTHING rather than polluting a real slot or drill.
 
     Both sides are read; a two-way player has swings and pitches, and the metric
     registry already knows which is which.
     """
     out = {}
     for table in (db.swings, db.pitch_metrics):
-        has_pt = table is db.pitch_metrics
-        cols = [db.sessions.c.session_date, db.sessions.c.id,
-                table.c.metric_key, table.c.value]
-        if has_pt:
-            cols.append(table.c.pitch_type)
+        is_pitching = table is db.pitch_metrics
+        split_col = table.c.pitch_type if is_pitching else table.c.context
         rows = conn.execute(
-            select(*cols)
+            select(db.sessions.c.session_date, db.sessions.c.id,
+                   table.c.metric_key, table.c.value, split_col.label("split"))
             .select_from(db.sessions.join(table, table.c.session_id == db.sessions.c.id))
             .where((db.sessions.c.player_id == player_id) & (table.c.value.isnot(None)))
             .order_by(db.sessions.c.session_date)).all()
         for r in rows:
-            if has_pt and metrics.is_pitch_specific(r.metric_key):
-                # An unlabelled pitch can't be attributed to an arsenal slot, so
-                # it contributes to nothing rather than polluting a real one.
-                if not r.pitch_type:
+            must_split = (metrics.is_pitch_specific(r.metric_key) if is_pitching
+                          else metrics.is_context_specific(r.metric_key))
+            if must_split:
+                # Unlabelled contributes to nothing rather than polluting a real
+                # slot or drill. It is still stored and still shown on the profile.
+                if not r.split:
                     continue
-                key = (r.metric_key, r.pitch_type)
+                key = (r.metric_key, r.split)
             else:
                 key = (r.metric_key, None)
             out.setdefault(key, []).append(
@@ -341,7 +354,9 @@ def summarize(metric, recent_mean, baseline_mean, delta, n_sessions, pitch_type=
     sign = "+" if delta > 0 else ""
     what = metric.label
     if pitch_type:
-        label = metrics.PITCH_TYPE_LABELS.get(pitch_type, pitch_type)
+        # split_label, not PITCH_TYPE_LABELS: this value is a drill context on a
+        # hitting row ("Tee bat speed is up"), a pitch code on a pitching one.
+        label = metrics.split_label(pitch_type)
         what = f"{label} {metric.label[0].lower()}{metric.label[1:]}"
     return (f"{what} {fmt(metric.key, recent_mean)} vs "
             f"{fmt(metric.key, baseline_mean)} baseline "
@@ -523,7 +538,7 @@ def evaluate_intervention(engine, intervention_id, write=True):
         moved = abs(delta) >= metric.mmc and abs(effect) >= metrics.MIN_EFFECT_SIZE
         label = metric.label
         if pitch_type:
-            label = (f"{metrics.PITCH_TYPE_LABELS.get(pitch_type, pitch_type)} "
+            label = (f"{metrics.split_label(pitch_type)} "
                      f"{metric.label[0].lower()}{metric.label[1:]}")
         results.append({
             "metric_key": key, "pitch_type": pitch_type,

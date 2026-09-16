@@ -195,6 +195,16 @@ swings = Table(
     Column("player_id", Integer, ForeignKey("players.id"), nullable=False),
     Column("seq", Integer),             # swing number within the session
     Column("ts", DateTime),
+    # Which drill this swing came from -- see metrics.SWING_CONTEXTS. This is the
+    # hitting side's pitch_type and it exists for the same reason: drill moves the
+    # numbers more than a swing change does, so a metric pooled across drills moves
+    # whenever the hitter's DRILL MIX moves. Measured on the first real export, a
+    # tee-vs-live gap of 11.3 mph in bat speed against a 1.5 mph threshold.
+    #
+    # NULL = untagged, and an untagged swing contributes to NO context's baseline,
+    # exactly as an unlabelled pitch contributes to no pitch type. It is kept and
+    # shown; it is never folded into a real drill.
+    Column("context", String(16)),
     Column("metric_key", String(60), nullable=False),
     Column("value", Float),
 )
@@ -212,7 +222,8 @@ pitch_metrics = Table(
 )
 
 # The access pattern for every baseline and trend query in changes.py.
-Index("ix_swings_player_metric_ts", swings.c.player_id, swings.c.metric_key, swings.c.ts)
+Index("ix_swings_player_metric_ts",
+      swings.c.player_id, swings.c.metric_key, swings.c.context, swings.c.ts)
 Index("ix_swings_session", swings.c.session_id)
 Index("ix_pitch_player_metric_ts",
       pitch_metrics.c.player_id, pitch_metrics.c.metric_key, pitch_metrics.c.ts)
@@ -272,11 +283,19 @@ player_baselines = Table(
     "player_baselines", metadata,
     Column("player_id", Integer, ForeignKey("players.id"), primary_key=True),
     Column("metric_key", String(60), primary_key=True),
-    # '' = pooled across pitch types. Part of the key because a fastball's ride
-    # and a slider's are different measurements, not two samples of one -- see
-    # metrics.PITCH_SPECIFIC. Empty string rather than NULL: NULLs in a composite
-    # primary key don't compare equal, so dedupe would silently stop working.
-    Column("pitch_type", String(4), primary_key=True, server_default=""),
+    # '' = pooled. Part of the key because a fastball's ride and a slider's are
+    # different measurements, not two samples of one -- see metrics.PITCH_SPECIFIC.
+    # Empty string rather than NULL: NULLs in a composite primary key don't compare
+    # equal, so dedupe would silently stop working.
+    #
+    # ** This column carries TWO vocabularies. ** A pitch code (FB/SL/...) on a
+    # pitching row, a swing context (tee/machine/...) on a hitting row. One column
+    # because the two sides never share a row, and a second column would mean a
+    # permanent NULL in half of every composite key -- the exact thing the empty
+    # string above exists to avoid. Render it with metrics.split_label(), never by
+    # looking up PITCH_TYPE_LABELS directly. Width is 16 for the longest context
+    # ("soft_toss"), not 4 for the longest pitch code.
+    Column("pitch_type", String(16), primary_key=True, server_default=""),
     Column("window_end", Date, primary_key=True),
     Column("window_start", Date),
     Column("n", Integer),
@@ -293,9 +312,10 @@ change_events = Table(
     Column("id", Integer, primary_key=True),
     Column("player_id", Integer, ForeignKey("players.id"), nullable=False),
     Column("metric_key", String(60), nullable=False),
-    # Which pitch this is about. NULL = pooled (release point, and the hitting
-    # metrics). A pitch-specific metric with no pitch type is not reportable.
-    Column("pitch_type", String(4)),
+    # Which pitch, or which drill -- see the two-vocabulary note on
+    # player_baselines.pitch_type. NULL = pooled (release point). A pitch-specific
+    # or context-specific metric with no split value is not reportable.
+    Column("pitch_type", String(16)),
     Column("detected_on", Date, nullable=False),
     Column("direction", String(8)),          # up|down
     Column("recent_mean", Float),
@@ -365,7 +385,11 @@ INTERVENTION_CATEGORIES = ["grip", "pitch_shape", "bat_path", "drill",
 GOAL_DIRECTIONS = ["increase", "decrease", "target_band"]
 
 # Structural roles a source column can map to, alongside any metric key.
-COLUMN_ROLES = ["player", "vendor_id", "date", "session", "pitch_type", "seq", "ignore"]
+# `player_first` / `player_last` exist because the Blast CSV export splits the name
+# over two columns and there is no single "player" column to map. `context` is the
+# hitting side's `pitch_type` -- see swings.context.
+COLUMN_ROLES = ["player", "player_first", "player_last", "vendor_id", "date",
+                "session", "pitch_type", "context", "seq", "ignore"]
 
 
 # ===========================================================================

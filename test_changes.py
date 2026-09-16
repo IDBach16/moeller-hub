@@ -50,6 +50,15 @@ def make_player(first, last, is_pitcher=False):
             is_pitcher=is_pitcher)).inserted_primary_key[0]
 
 
+# Every hitting fixture below is one drill. Blast metrics are context-specific --
+# a swing with no drill context contributes to no baseline, exactly as an
+# unlabelled pitch contributes to no pitch type -- so a fixture that left this
+# NULL would silently measure nothing and every check here would read as "no
+# change detected". Tagging it 'tee' is the hitting equivalent of the
+# pitch_type="FB" two lines down, which is there for the same reason.
+HITTING_CONTEXT = "tee"
+
+
 def add_session(player_id, when, metric_key, mean, sd, n=10,
                 side="hitting", purpose=None, ref=None):
     """One session of n observations drawn around `mean`."""
@@ -63,9 +72,11 @@ def add_session(player_id, when, metric_key, mean, sd, n=10,
         rows = [{"session_id": sid, "player_id": player_id, "seq": i + 1,
                  "metric_key": metric_key, "value": RNG.gauss(mean, sd)}
                 for i in range(n)]
-        if side == "pitching":
-            for r in rows:
+        for r in rows:
+            if side == "pitching":
                 r["pitch_type"] = "FB"
+            else:
+                r["context"] = HITTING_CONTEXT
         conn.execute(insert(table), rows)
     return sid
 

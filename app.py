@@ -106,7 +106,29 @@ def _metric_options():
 
 def create_app():
     app = Flask(__name__, static_folder=STATIC_DIR, template_folder="templates")
-    app.secret_key = os.environ.get("SECRET_KEY", "moeller-hub-2027-secret")
+
+    # The signed session cookie IS the password gate: session["authed"] is only
+    # as private as the key that signs it. This repo is public, so a hardcoded
+    # fallback here is the same as no gate at all -- anyone could mint an authed
+    # cookie from the published string and reach the write endpoints, which
+    # writes_enabled() opens the moment HUB_PASSWORD is set.
+    #
+    # So: refuse to boot on Railway without it. Loud beats silently insecure.
+    # Deliberately NOT a random per-boot key in production -- that is secure and
+    # hostile, logging every coach out on every redeploy.
+    secret = os.environ.get("SECRET_KEY")
+    if not secret:
+        if os.environ.get("RAILWAY_ENVIRONMENT"):
+            raise RuntimeError(
+                "SECRET_KEY is not set on this service. Set it in the Railway "
+                "variables and redeploy -- without it the session cookie is "
+                "forgeable and the HUB_PASSWORD gate can be walked straight past.")
+        # Local only. RAILWAY_ENVIRONMENT is unset by definition here, so there
+        # is no public URL to protect, and a fixed value keeps a dev session
+        # alive across restarts instead of logging you out on every reload.
+        secret = "dev-only-not-secret"
+    app.secret_key = secret
+
     app.permanent_session_lifetime = timedelta(days=30)
 
     # Build the schema and, on a genuinely empty database, seed the roster --
@@ -150,6 +172,16 @@ def create_app():
     # -----------------------------------------------------------------------
     # Password gate
     # -----------------------------------------------------------------------
+
+    @app.context_processor
+    def inject_gate():
+        """Whether there is a login to log out OF.
+
+        base.html renders the Log out link on this. With the gate off (its state
+        since 2026-08-14) /logout just clears an empty session and bounces to a
+        /login that redirects straight back -- a link to nowhere.
+        """
+        return {"gate_on": bool(HUB_PASSWORD)}
 
     @app.before_request
     def require_login():
@@ -492,8 +524,14 @@ def create_app():
         strips = []
         if p["player"]["is_pitcher"]:
             strips = percentiles.by_pitch(_engine(), p["player"]["id"])
-        # In-season, from the charted games. The only percentiles a hitter can
-        # have until there is bat data, and the game layer for a pitcher.
+        # ONE strip, drill-adjusted. Not one per drill: the drill effect is an
+        # offset of about 3 mph on bat speed, while a per-drill field is 5-10
+        # hitters -- so splitting bought a small correction and paid a coarse,
+        # unstable rank for it. See the note above percentiles.BLAST_STRIP.
+        # Ranked for anyone with bat data, two-way players included; his bat is
+        # not a footnote just because he also pitches.
+        blast = percentiles.blast_strip(_engine(), p["player"]["id"])
+        # In-season, from the charted games -- the competition layer.
         awre_name = p["aliases"].get("awre") or p["player"]["name"]
         gyear = request.args.get("gyear")
         side = "pitching" if p["player"]["is_pitcher"] else "hitting"
@@ -505,6 +543,7 @@ def create_app():
         return render_template(
             "player.html", nav="players", p=p, card=card, slog=slog,
             strips=strips, game_strip=game_strip, game_bat=game_bat,
+            blast=blast,
             writes_enabled=writes_enabled(),
             metric_options=development.goal_metric_options(),
             directions=db.GOAL_DIRECTIONS,
@@ -556,10 +595,17 @@ def create_app():
 
     @app.route("/team")
     def team_page():
+        import development
         import profiles
         import season as season_mod
+        # `due` is the same call the home page makes. The home page's "N needs
+        # attention" chip counts open name reviews + due goals + due
+        # interventions and links here, so /team has to answer for all three --
+        # it used to surface only the review count, which made the number right
+        # and the destination a third of an answer.
         return render_template("team.html", nav="team",
                                o=profiles.team_overview(_engine()),
+                               due=development.due_for_review(_engine()),
                                prog=season_mod.program_development(),
                                writes_enabled=writes_enabled())
 

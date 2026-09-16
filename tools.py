@@ -8,7 +8,20 @@ move them from the front page to /tools without touching any markup.
 
 `category` is the nav section each tool belongs to once that split happens --
 see PLAYER_DEV_SPEC.md section 8.1.
+
+`note` is rendered into the page with |safe, so it may carry markup -- and so it
+must never carry a credential from source. See TEAM_STATS_NOTE below.
 """
+import os
+
+# The Team Stats dashboard sits behind its own shared login. That login used to
+# be written out here in full and rendered onto the page; this repo is public, so
+# it was published twice over. It lives in the environment now.
+#
+# Unset -> no note at all, which is the right default: a deploy that has not been
+# told the credentials should show none, not a placeholder. Set it on Railway as
+# e.g. TEAM_STATS_NOTE='Login: <strong>x</strong> | Password: <strong>y</strong>'.
+TEAM_STATS_NOTE = os.environ.get("TEAM_STATS_NOTE", "")
 
 TOOLS = [
     {
@@ -69,7 +82,7 @@ TOOLS = [
         "category": "prep",
         "desc": "Full team batting and pitching stats dashboard with leaderboards "
                 "and Synergy scouting.",
-        "note": "Login: <strong>moeller</strong> &nbsp;|&nbsp; Password: <strong>moeller1</strong>",
+        "note": TEAM_STATS_NOTE,
         "url": "https://moeller-2026-stats-production.up.railway.app/login",
         "icon": '<path d="M18 20V10M12 20V4M6 20v-6"/>',
     },
