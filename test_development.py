@@ -79,7 +79,11 @@ print("\n1. creating a goal")
 gid = development.create_goal(
     engine, PID, title="Add a tick to the fastball", metric_key="fb_velocity",
     direction="increase", target_value=88.0, set_by="Ian",
-    review_on=str(TODAY + timedelta(days=30)), detail="New grip plus long toss")
+    # set_on must be pinned to the test's own clock like every other call here.
+    # Left out it defaults to the real date.today(), so once the wall clock
+    # passed TODAY+30 the review date fell into the past and this raised.
+    set_on=str(TODAY), review_on=str(TODAY + timedelta(days=30)),
+    detail="New grip plus long toss")
 check("a measurable goal is created", isinstance(gid, int))
 
 with engine.connect() as conn:

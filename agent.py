@@ -1732,6 +1732,15 @@ def answer(history, ip, focus=None):
     if focus in FOCUS_WORDS:
         system_blocks.append({"type": "text",
                               "text": FOCUS.format(side=focus, **FOCUS_WORDS[focus])})
+    if focus == "pitching":
+        # The pitch design framework the player note is written from: the shape
+        # taxonomy, the separation test, the release-height gate and the plain
+        # English glossary. Shared with SYSTEM_PITCHING rather than restated, so
+        # the chat and the note cannot drift apart on what a good slider is. It
+        # rides after the cached prefix, so the hitting side never pays for it.
+        import summaries
+        system_blocks.append({"type": "text",
+                              "text": summaries.PITCHING_KNOWLEDGE})
 
     client = _anthropic()
     for _ in range(6):

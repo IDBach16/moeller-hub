@@ -351,7 +351,8 @@ p_sys, p_schema = summaries.note_spec({"role": "pitcher"})
 h_sys, h_schema = summaries.note_spec({"role": "position player"})
 
 check("a pitcher gets the pitching analyst",
-      p_sys.startswith("You are the pitching development analyst"))
+      "You are the pitching development analyst" in p_sys[:200],
+      p_sys[:60])
 check("a hitter gets the HITTING analyst, not the pitching one",
       h_sys.startswith("You are the hitting development analyst"),
       h_sys[:60])
@@ -392,8 +393,17 @@ check("  and reports drill mix as usage, never as a swing change",
       "cage_drill_mix" in low and "never as a change in his swing" in low)
 check("the hitting prompt refuses to prescribe mechanics",
       "do not prescribe mechanics" in low)
-check("  the pitching one still does too",
-      "do not prescribe mechanics" in p_sys.lower())
+# The pitching prompt was deliberately loosened to allow ONE grip/seam/intent
+# cue, because those follow from numbers the model can see. Body mechanics --
+# slot, stride, posture -- still need video it does not have, so they stay
+# banned. These two checks are the fence around that exception.
+plow = p_sys.lower()
+check("  the pitching one bans BODY mechanics",
+      "do not prescribe body mechanics" in plow
+      and "lower his arm slot" in plow and "shorten his stride" in plow)
+check("  and the cue exception stays bounded to one, as an option",
+      "at most one per note" in plow and "never as an instruction" in plow,
+      "the cue allowance lost its guardrail")
 check("the hitting prompt warns that two Blast bands pass everybody",
       "wide enough that every moeller hitter clears them" in low)
 

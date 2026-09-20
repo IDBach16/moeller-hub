@@ -18,13 +18,38 @@ Their agent `SYSTEM` prompts also contradict each other on formatting (main allo
 a markdown subset, this branch demands plain text). A merge is a ~350-line
 conflict in `app.py` and is its own task — not a step inside another one.
 
-## ⚠ OPEN — Ian is writing the two analyst prompts himself
+## ⚠ OPEN — the HITTING analyst prompt is still a placeholder
 
-`SYSTEM_PITCHING` and `SYSTEM_HITTING` in `summaries.py` are **placeholders written
-by Claude**. Ian is replacing both with in-depth prompts from his own hitting and
-pitching knowledge — the goal being an **"MLB analyst"** read that is specific to
-who each player actually is, not a generic template. **Do not polish these in
-passing; they are being rewritten.**
+`SYSTEM_HITTING` in `summaries.py` is still a **placeholder written by Claude**,
+awaiting the same treatment the pitching side has had. **Do not polish it in
+passing; it is being rewritten** with Ian's own hitting knowledge, the goal being
+an **"MLB analyst"** read specific to who each hitter actually is.
+
+**`SYSTEM_PITCHING` is done** (2026-09-20, built with the `prompt-builder` skill).
+It is no longer a placeholder — edit it deliberately or not at all. What it now
+carries, sourced from the PRP Baseball pitch design chart and blogs plus RPP
+Baseball, with every band checked against our own data:
+
+- per-pitch profiles (efficiency, axis, break) for all ten pitch types
+- spin axis read as a **clock face** — degrees ÷ 30 — because every published
+  target is in clock time and our column is in degrees. Our RHP four-seams sit at
+  1:16 and our LHP four-seams at 10:40, which is the same pitch mirrored
+- **Bauer Units** (spin ÷ velo) as the fair spin read for a high school arm: our
+  fastball median is 24.3 against an MLB average of 23.9, at 80 mph
+- the fastball **shape taxonomy** and the dead zone — 8 of 23 measured fastballs
+  are in it, with healthy Bauer Units, so it is a shape problem not a spin one
+- **the release-height gate**: dead zone has two opposite fixes and slot decides
+  which. Never tell a low-slot arm to chase ride
+- grip / seam / intent **cues**, one per note, as an option. Body mechanics stay
+  banned — no video, no biomechanics. `test_agent.py` fences that exception
+
+The same knowledge is shared with the pitching-side chat: it lives in
+`summaries.PITCHING_KNOWLEDGE` and `agent.py` appends it when `focus ==
+"pitching"`, so the note and the chat cannot drift apart on what a good slider is.
+The note-specific parts — role, output contract, reading order — stay in
+`SYSTEM_PITCHING` alone, because the chat has no note schema.
+
+`SYSTEM_PITCHING.draft.md` is the same text with its sourcing notes.
 
 **The order matters: CONTEXT FIRST, THEN PROMPT.** The model never sees raw data —
 `build_context()` hands it a compact object (4,623 chars for JJ Skeldon) and the
@@ -39,7 +64,12 @@ Candidates raised, none built:
 - trend slope over the last N sessions, plus his own session-to-session SD —
   is he volatile or repeatable?
 - his percentile among Moeller hitters on each metric (`percentiles` already
-  computes this; it is simply not in the context)
+  computes this; it is simply not in the context). **Done on the pitching side**
+  — `build_context` now carries `stuff_by_pitch` from `percentiles.by_pitch()`,
+  which was the unlock: `recent_sessions` averages a bullpen across every pitch
+  thrown that day, so a blended induced vertical break describes no pitch he
+  actually throws, and arsenal work was impossible without it. 24 of 30 pitchers
+  carry it. The hitting equivalent is `percentiles.blast_strip()`
 - correlations inside his own swing (does attack angle move with bat speed?)
 - game-vs-cage cross-reference — the hitting twin of the Glotfelty finding: is he
   practising the swing he actually uses?
