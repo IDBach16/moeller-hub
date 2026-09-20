@@ -850,9 +850,16 @@ def _call_model(context):
     resp = client.messages.create(
         model=MODEL,
         # The model thinks by default and max_tokens caps thinking AND text
-        # together -- 1100 risked truncating the JSON. Still small money: this
-        # runs once per player per week, only when their data has moved.
-        max_tokens=2000,
+        # together, so this is a THINKING budget plus a note, not a note length.
+        # 1100 risked truncating the JSON; 2000 then broke outright once the
+        # pitching prompt started asking for real analysis -- classifying shape,
+        # running the separation test, checking the release-height gate. A
+        # measured Homoelle call spent 1319 tokens thinking and was cut off mid
+        # JSON at exactly 2000, which surfaces as "model returned nothing"
+        # because the truncation guard below refuses to cache a partial note.
+        # 6000 leaves room for the thinking the analysis actually needs. Still
+        # small money: once per player per week, only when their data has moved.
+        max_tokens=6000,
         output_config={"effort": "medium",
                        # The schema guarantees the reply parses; the template
                        # renders the fields directly.
