@@ -293,6 +293,28 @@ read      TWO clauses in one sentence: what kind of arm he is, then the thing th
           arm with 16.7 inches of horizontal break, and the next step is a
           changeup that separates from it" beats "IVB 14.7, horizontal break
           12.1". Never open on the deficit.
+overview  THE PART HE ACTUALLY READS. Three to five sentences of plain English
+          that stand on their own, written so a pitcher who reads only this
+          paragraph knows what kind of arm he is, what is working, what is
+          holding him back and what he is doing about it next. Everything below
+          is the evidence for this; this is the conclusion.
+
+          Write it in this order: what he is, what is already good, the one
+          thing in the way, and what he does next. THE LAST SENTENCE IS ALWAYS
+          THE NEXT STEP — never end this paragraph on a description, however
+          interesting, because the last line is the one he leaves with.
+
+          Carry THREE numbers at most in the whole paragraph, and only ones that
+          decide something. This is the story; findings is where the arithmetic
+          lives. If you find yourself listing a pitch's measurements here, they
+          belong below instead. Name a pitch in words a pitcher uses: "your
+          slider" rather than "SL", "how much your fastball rides" rather than
+          "induced vertical break".
+
+          Say it straight without being brutal. "Your changeup and your fastball
+          are moving almost the same way, so a hitter sees one pitch out of your
+          hand" is honest and useful; "your changeup is bad" is neither. He
+          should finish it knowing exactly where he stands and what to go do.
 findings  2 to 5 groups, PARENT then items. The parent is a pitch code — FB SI CT
           SL CB CH SP — when the items are that pitch's variables, including its
           game strike and whiff rates; DELIVERY for release height, release side
@@ -462,13 +484,24 @@ PITCHING_PARENTS = ["FB", "SI", "CT", "SL", "CB", "CH", "SP",
 HITTING_PARENTS = ["SWING", "PATH", "CONTACT", "DRILLS", "BENCHMARK", "GAME"]
 
 
-def note_schema(parents):
+def note_schema(parents, overview=False):
+    """The note's shape. `overview` adds the plain-language synthesis field.
+
+    Opt-in rather than always-on because it is required once present, and
+    SYSTEM_HITTING is still the placeholder prompt -- adding a required field
+    it has never been told to write would make every hitting note fail. Turn it
+    on there in the same change that rewrites that prompt.
+    """
+    required = ["read", "findings", "watch", "caveat"]
+    if overview:
+        required.insert(1, "overview")
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["read", "findings", "watch", "caveat"],
+        "required": required,
         "properties": {
             "read": {"type": "string"},
+            **({"overview": {"type": "string"}} if overview else {}),
             "findings": {
                 "type": "array",
                 "items": {
@@ -499,7 +532,7 @@ def note_schema(parents):
         }
 
 
-PITCHING_NOTE_SCHEMA = note_schema(PITCHING_PARENTS)
+PITCHING_NOTE_SCHEMA = note_schema(PITCHING_PARENTS, overview=True)
 HITTING_NOTE_SCHEMA = note_schema(HITTING_PARENTS)
 
 

@@ -212,6 +212,11 @@ a.pctyear:hover{color:var(--gold-light);background:rgba(255,255,255,.05)}
 /* ===== structured development note ===== */
 .note-read{font-size:1rem;line-height:1.55;color:var(--gold-light);
   border-left:2px solid var(--gold);padding-left:.8rem;margin:0 0 1rem}
+/* Sits between the one-line read and the evidence. Deliberately quieter than
+   .note-read but larger than a finding: it is the paragraph a player stops at,
+   so it reads as prose rather than as another bordered callout. */
+.note-overview{font-size:.93rem;line-height:1.65;color:rgba(255,255,255,.9);
+  margin:0 0 1.15rem;max-width:68ch}
 .note-f{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.55rem}
 .note-f li{font-size:.87rem;line-height:1.55;color:rgba(255,255,255,.85);
   border-left:3px solid rgba(255,255,255,.15);padding-left:.7rem}
@@ -459,6 +464,10 @@ td.strong{color:var(--white);font-weight:700}
       {% set note = p.ai_summary.note if p.ai_summary else none %}
       {% if note %}
         <p class="note-read">{{ note.read }}</p>
+        {# The synthesis, for a player who reads one paragraph and stops. Only
+           the pitching schema asks for it, so a hitting note simply skips it
+           rather than rendering an empty block. #}
+        {% if note.overview %}<p class="note-overview">{{ note.overview }}</p>{% endif %}
         {% if note.findings %}
         {# Parent -> children, same structure as the header: the parent is the
            pitch (or the delivery / mix / game layer), the children are its
