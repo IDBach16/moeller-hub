@@ -115,8 +115,12 @@ raw_imports = Table(
     # is what makes the roadmap's protocols measurable (spec section 10) -- an
     # export can't tell us whether a bullpen was a baseline or a checkpoint.
     Column("side", String(10)),          # hitting | pitching
-    Column("session_type", String(20)),
-    Column("purpose", String(20)),
+    # Vendor-controlled text. Rapsodo sends "Live Batting Practice" and
+    # "Soft Toss/Front Flips" -- both 21 chars -- which silently passed on
+    # SQLite and hard-failed on Postgres at String(20), killing every nightly
+    # load from 2026-03 onward. Sized for the vendor, not for today's list.
+    Column("session_type", String(64)),
+    Column("purpose", String(64)),
     Column("note", Text),
 )
 
@@ -165,10 +169,10 @@ sessions = Table(
     Column("id", Integer, primary_key=True),
     Column("player_id", Integer, ForeignKey("players.id"), nullable=False),
     Column("session_date", Date, nullable=False),
-    Column("session_type", String(20), nullable=False),
+    Column("session_type", String(64), nullable=False),
     Column("source", String(20), nullable=False),
     Column("source_ref", String(120)),   # vendor session id / game key, for dedupe
-    Column("purpose", String(20)),
+    Column("purpose", String(64)),
     Column("notes", Text),
     Column("import_id", Integer, ForeignKey("raw_imports.id")),
     Column("created_at", DateTime, server_default=func.now()),
