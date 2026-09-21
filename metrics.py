@@ -6,7 +6,14 @@ better, how big a move has to be before it counts as a change, and how many
 observations a window needs before we trust it. Nothing downstream hard-codes a
 threshold -- changes.py reads all of it from here.
 
-IMPORTANT -- every threshold in this file is a PLACEHOLDER until we have a season
+mmc CALIBRATED 2026-09-21 from a season of our own data (Jan-Sep 2026). Method:
+for each metric, each player's session-to-session SD of session means (sessions
+of >=10 reps, players with >=3 sessions), then the median across players -- the
+typical wobble a coach should NOT be paged about. mmc = max(that, the old
+placeholder), never lowered. Measured on 15-18 players per metric. Still
+placeholders (no device data yet): extension, strike/whiff/heart/chase (charting),
+exit_velocity (HitTrax), body_rotation, on_plane_pct (Blast API-only). The
+original note follows for history: every threshold was a PLACEHOLDER until we had a season
 of our own data. They are deliberately in one file so they are trivial to revise.
 The spec's commitment is that the numbers are easy to change, not that the
 starting numbers are right.
@@ -67,21 +74,21 @@ class Metric:
 
 _PITCHING = [
     Metric("fb_velocity", "Fastball velocity", "mph", "pitching", HIGHER_BETTER,
-           mmc=0.8, min_n=15, sources=("rapsodo", "charting", "awre"), headline=True),
+           mmc=1.2, min_n=15, sources=("rapsodo", "charting", "awre"), headline=True),
     Metric("velocity", "Velocity", "mph", "pitching", HIGHER_BETTER,
-           mmc=0.8, min_n=15, sources=("rapsodo", "charting", "awre")),
+           mmc=1.2, min_n=15, sources=("rapsodo", "charting", "awre")),
     Metric("spin_rate", "Spin rate", "rpm", "pitching", HIGHER_BETTER,
            mmc=100, min_n=15, sources=("rapsodo",), headline=True, decimals=0),
     Metric("induced_vertical_break", "Induced vertical break", "in", "pitching", NEUTRAL,
-           mmc=1.0, min_n=15, sources=("rapsodo",), headline=True),
+           mmc=1.3, min_n=15, sources=("rapsodo",), headline=True),
     Metric("horizontal_break", "Horizontal break", "in", "pitching", NEUTRAL,
-           mmc=1.0, min_n=15, sources=("rapsodo",), headline=True),
+           mmc=1.5, min_n=15, sources=("rapsodo",), headline=True),
     Metric("spin_efficiency", "Spin efficiency", "%", "pitching", HIGHER_BETTER,
            mmc=5.0, min_n=15, sources=("rapsodo",)),
     Metric("release_height", "Release height", "ft", "pitching", NEUTRAL,
            mmc=0.15, min_n=15, sources=("rapsodo",), decimals=2),
     Metric("release_side", "Release side", "ft", "pitching", NEUTRAL,
-           mmc=0.15, min_n=15, sources=("rapsodo",), decimals=2),
+           mmc=0.6, min_n=15, sources=("rapsodo",), decimals=2),
     Metric("extension", "Extension", "ft", "pitching", HIGHER_BETTER,
            mmc=0.2, min_n=15, sources=("rapsodo",), decimals=2),
     # Execution, from the Charting App and AWRE rather than a device.
@@ -117,30 +124,30 @@ _PITCHING = [
 
 _HITTING = [
     Metric("bat_speed", "Bat speed", "mph", "hitting", HIGHER_BETTER,
-           mmc=1.5, min_n=20, sources=("blast",), headline=True),
+           mmc=1.8, min_n=20, sources=("blast",), headline=True),
     Metric("peak_hand_speed", "Peak hand speed", "mph", "hitting", HIGHER_BETTER,
            mmc=1.0, min_n=20, sources=("blast",)),
     Metric("attack_angle", "Attack angle", "deg", "hitting", TARGET_BAND,
-           mmc=2.0, min_n=20, sources=("blast",), target_band=(6.0, 11.0), headline=True),
+           mmc=2.5, min_n=20, sources=("blast",), target_band=(6.0, 11.0), headline=True),
     Metric("vertical_bat_angle", "Vertical bat angle", "deg", "hitting", TARGET_BAND,
-           mmc=2.0, min_n=20, sources=("blast",), target_band=(-33.0, -26.0)),
+           mmc=3.5, min_n=20, sources=("blast",), target_band=(-33.0, -26.0)),
     Metric("on_plane_efficiency", "On-plane efficiency", "%", "hitting", HIGHER_BETTER,
            mmc=5.0, min_n=20, sources=("blast",), headline=True),
     Metric("rotational_acceleration", "Rotational acceleration", "g", "hitting", HIGHER_BETTER,
-           mmc=1.0, min_n=20, sources=("blast",)),
+           mmc=1.5, min_n=20, sources=("blast",)),
     Metric("early_connection", "Early connection", "deg", "hitting", TARGET_BAND,
-           mmc=3.0, min_n=20, sources=("blast",), target_band=(96.0, 105.0)),
+           mmc=4.0, min_n=20, sources=("blast",), target_band=(96.0, 105.0)),
     Metric("connection_at_impact", "Connection at impact", "deg", "hitting", TARGET_BAND,
            mmc=3.0, min_n=20, sources=("blast",), target_band=(83.0, 88.0)),
     # In the CSV export but NOT in the 2024 API puller, which is why it was missing
     # from this registry until the first real export landed. Neutral polarity: we
     # have no defensible direction for it, and a target band would be inventing one.
     Metric("hinge_angle", "Hinge angle at impact", "deg", "hitting", NEUTRAL,
-           mmc=3.0, min_n=20, sources=("blast",)),
+           mmc=5.0, min_n=20, sources=("blast",)),
     Metric("body_rotation", "Body rotation", "%", "hitting", NEUTRAL,
            mmc=5.0, min_n=20, sources=("blast",)),
     Metric("body_tilt", "Body tilt", "deg", "hitting", NEUTRAL,
-           mmc=3.0, min_n=20, sources=("blast",)),
+           mmc=4.0, min_n=20, sources=("blast",)),
     Metric("power", "Power", "kW", "hitting", HIGHER_BETTER,
            mmc=0.3, min_n=20, sources=("blast",), decimals=2),
     Metric("time_to_contact", "Time to contact", "s", "hitting", LOWER_BETTER,

@@ -82,6 +82,39 @@ filling before the prompts lean on it.
 The `prompt-builder` skill is set up for this job — it interviews and drafts. Run
 it once per side.
 
+## Thresholds are calibrated, not placeholders (2026-09-21)
+
+`metrics.py` `mmc` values were set from a season of our own data. Method: per
+metric, each player's **session-to-session SD of session means** (sessions of
+>=10 reps, players with >=3 sessions), median across players -- the wobble a
+coach must not be paged about -- then `mmc = max(measured, old placeholder)`,
+never lowered. 15-18 players per metric. The two that moved most: `release_side`
+0.15 -> **0.6 ft** (device placement varies between sessions; it was the most
+common item in the review queue for exactly that reason) and
+`vertical_bat_angle` 2 -> 3.5 deg. Still placeholders: extension, the charting
+execution metrics, HitTrax exit velocity, and the two Blast API-only metrics.
+Re-run the calibration when a new season lands; the queries are in git history
+(commit "Calibrate mmc"). Detection also gates on effect size >= 0.5, so mmc is
+a raw-unit floor, not the whole test -- calibrating it trimmed the backlog
+58 -> 48, no more; volume is a triage-UI problem.
+
+## Handedness comes from the Rapsodo profile
+
+`rapsodo/handedness.py`. `player.pitcherProfile.handedness` / `hitterProfile.
+handedness`: **0 = R, 1 = L**, decoded against the 11 known-throws players and
+validated by each pitcher's FB spin-axis cluster (22/23 agree; the 23rd is a
+vendor-side entry error on Ujvagi, roster and physics both say R). The loader
+calls `handedness.apply()` on every resolved player and **fills NULLs only** --
+the roster is the source of truth and is never overwritten. Before this,
+`throws` was null on 63 of 74 players and the pitching note could not name a
+side for spin axis.
+
+## Staff accounts in vendor feeds
+
+`seed_roster.NOT_PLAYERS` is the single denylist; `load_db._staff_names()` reads
+it so the nightly load skips a coach's login silently (counted under
+`staff_skipped`) instead of re-queueing him as "unresolved" every night.
+
 ## The two rules that matter most
 
 **1. The database computes. The LLM explains.**

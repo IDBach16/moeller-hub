@@ -44,6 +44,21 @@ import db  # noqa: E402
 import metrics  # noqa: E402
 from sqlalchemy import delete, insert, select  # noqa: E402
 
+
+def _staff_names() -> set:
+    """Coach logins that show up in Rapsodo as if they were players.
+
+    One source of truth -- seed_roster.NOT_PLAYERS -- so the seeder and this
+    loader can never disagree about who is staff. The fallback keeps the load
+    working if the import path differs (this file is run both directly and via
+    daily.py); it must match the set in seed_roster.
+    """
+    try:
+        from seed_roster import NOT_PLAYERS
+        return set(NOT_PLAYERS)
+    except Exception:                                       # noqa: BLE001
+        return {"david cydrus"}
+
 VENDOR = "rapsodo"
 
 
@@ -202,6 +217,15 @@ def load(dry_run: bool = True) -> dict:
             # Vendor id first -- it's stable. Fall back to name only if we've
             # never seen this Rapsodo id before.
             player_id = vendor_ids.get(rap_player_id) or names.get(_name_key(raw_name))
+            if not player_id and _name_key(raw_name) in _staff_names():
+                # A coach's own Rapsodo login (David Cydrus throws BP on it).
+                # seed_roster already denylists these so they never become
+                # players; without this the nightly load re-queued him as
+                # "unresolved" every single night, which reads as a data
+                # problem and is not one. Counted, not queued.
+                stats.setdefault("staff_skipped", {}).setdefault(raw_name, 0)
+                stats["staff_skipped"][raw_name] += 1
+                continue
             if not player_id:
                 # Cut / JV / alumni arms who aren't on the roster. We do NOT invent a
                 # player record for them -- the name is queued instead, and the raw
@@ -211,6 +235,15 @@ def load(dry_run: bool = True) -> dict:
                     raw_name or rap_player_id, {"rapsodo_id": rap_player_id, "sessions": 0}
                 )["sessions"] += 1
                 continue
+
+            if not dry_run:
+                # Fill bats/throws from the Rapsodo profile where the roster left
+                # them blank. Never overwrites -- the roster is the source of
+                # truth; see handedness.py for the enum and its validation.
+                import handedness
+                got = handedness.apply(conn, player_id, p)
+                if got:
+                    stats.setdefault("handedness_filled", {})[raw_name] = got
 
             # Resolved by name this time -- record the vendor id so every future load
             # matches on a stable id and never has to guess from a name again.
