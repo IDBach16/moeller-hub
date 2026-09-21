@@ -441,6 +441,56 @@ This is a **charting-input** problem, not an architecture problem. No database
 change creates information that was never recorded. Fixing it means charters
 tagging Slider vs Curveball, and it only helps data collected afterwards.
 
+## The nightly job — `nightly.py` (added 2026-09-21)
+
+The `rapsodo-cron` service's start command is now **`python nightly.py`**, not
+`rapsodo/daily.py`. Same 09:00 UTC schedule; the Rapsodo pull is step 1 of six:
+
+    rapsodo -> detect -> notes (Mondays) -> freshness -> record -> email
+
+It exists because the analysis layer was never scheduled: data landed nightly
+for months while change detection ran only from the "Run detection now" button
+and the weekly notes had no trigger at all (spec 12.1 #5 was never done).
+
+- **Every step runs even if an earlier one failed.** A Rapsodo auth error must
+  not stop detection on Monday's Blast data. Problems are collected; exit code
+  is non-zero if any occurred, so the run shows as failed, not green.
+- **`job_runs` is the record.** Written LAST, so a missing row for last night
+  means the job did not finish. This is the answer to "did it run?" — do not
+  trust cron logs (they showed nothing for a job that crashed nightly for six
+  months). `select * from job_runs order by ran_at desc limit 7`.
+- **Email needs `GMAIL_APP_PASSWORD` + `ALERT_TO`** on the service. Without
+  them the job still runs everything and prints the report. Same credential
+  kind as `email_draft.py --gmail`. `ALERT_ONLY_ON_PROBLEM=1` silences the
+  daily OK heartbeat — but the heartbeat is the point: its *absence* is the
+  signal nothing else gives.
+- Notes run on the Monday 09:00 UTC run for players with new data in 7 days.
+  Needs `ANTHROPIC_API_KEY` on the service (referenced from `web`).
+- The Blast puller runs detection itself after a committed load, so Monday's
+  swings are visible Monday morning rather than after that night's run.
+
+**A `cronSchedule` persists when you drop it from railway.json.** Config-as-code
+only sets keys that are present, so "deploy without a cron to force a one-shot"
+works only on a service that never had one. To exercise the nightly code on
+demand: `railway ssh --service web "python nightly.py"` (vendor creds are absent
+on web by design; that step fails, the rest runs for real). Judge by `job_runs`.
+
+**Config-as-code cannot be replaced by IaC for these crons (checked 2026-09-21).**
+`railway config migrate` emits `cronSchedule`, `builder` and restart policy only
+as *comments* — the `.railway/railway.ts` schema does not carry them. So the
+untracked `railway.json` remains the only CLI route, with the swap-and-restore
+dance for blast-cron. The clean fix is to set each cron's start command and
+schedule **in the Railway dashboard** and delete `railway.json`; that needs a
+person, not the CLI.
+
+**Windows tasks — S4U split (2026-09-21).** `Moeller Daily Check`, `Moeller
+Weekly Reports` and `Moeller Update AWRE Data` now run as `S4U` (whether or not
+anyone is logged in; tested, result 0). The four that `git push` — Video Scout,
+Pitch Overlay, Umpire Cards, HitTrax Weekly — stay `Interactive`: an S4U logon
+cannot open the Windows Credential Store, so Git Credential Manager fails under
+it. Moving those needs `LogonType Password`, i.e. Ian re-registering them with
+his Windows password. `_pipeline\Set_S4U.ps1` (`-Revert` to undo).
+
 ## Deployment
 
 Project `feisty-luck` runs three services: `web` (live hub, from GitHub `main`),
