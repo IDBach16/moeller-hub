@@ -188,7 +188,9 @@ def compose(report: dict) -> tuple[str, str]:
     det = report["steps"].get("detect", {})
     notes = report["steps"].get("notes", {})
     fired = det.get("fired", det.get("events_written", det.get("new", "?")))
-    written = notes.get("written", 0) if "skipped" not in notes else "-"
+    # run_weekly returns its own numeric "skipped" COUNT; the Monday gate stores a
+    # string reason under the same key. Only the string means "did not run".
+    written = "-" if isinstance(notes.get("skipped"), str) else notes.get("written", 0)
 
     subject = (f"Moeller nightly {'OK' if ok else 'ATTENTION'} -- "
                f"Rapsodo thru {d('rapsodo')}, Blast thru {d('blast')}, "
