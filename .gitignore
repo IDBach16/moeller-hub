@@ -25,3 +25,7 @@ blast/exports/
 # .gitignore, so listing it would strip the deploy config out of the upload.
 # It is excluded from git via .git/info/exclude instead, which keeps it out of
 # commits (and so out of any future merge to main) while still shipping.
+
+# Playwright screenshots + HTML dumps from blast/pull_export.py failures.
+# Can contain a login screen with the account email; never commit.
+blast/diagnostics/
