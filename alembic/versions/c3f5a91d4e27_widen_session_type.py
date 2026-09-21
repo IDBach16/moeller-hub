@@ -44,7 +44,17 @@ COLS = [
 ]
 
 
+def _is_sqlite():
+    return op.get_bind().dialect.name == "sqlite"
+
+
 def upgrade():
+    # SQLite has no ALTER COLUMN and never enforced the width in the first place
+    # -- that is precisely why this bug was invisible locally. There is nothing
+    # to widen there, and attempting it stalls every later migration for local
+    # dev. Postgres is the only backend this change is real on.
+    if _is_sqlite():
+        return
     for table, col, nullable in COLS:
         op.alter_column(table, col,
                         existing_type=sa.String(20),
@@ -56,6 +66,8 @@ def downgrade():
     # Narrowing truncates. Any row already holding a >20 char session type would
     # fail or be cut, so this is deliberately lossy and only safe on a database
     # that never took a wide value.
+    if _is_sqlite():
+        return
     for table, col, nullable in COLS:
         op.alter_column(table, col,
                         existing_type=sa.String(64),

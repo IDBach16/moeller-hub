@@ -265,7 +265,30 @@ def load(csv_path: Path, commit: bool) -> int:
     if commit:
         cmd.append("--commit")
     print(f"\n=== {' '.join(cmd[1:])} ===")
-    return subprocess.call(cmd, cwd=str(PROJECT_ROOT))
+    rc = subprocess.call(cmd, cwd=str(PROJECT_ROOT))
+    if rc == 0 and commit:
+        detect_after_load()
+    return rc
+
+
+def detect_after_load() -> None:
+    """Run change detection on what just landed.
+
+    Without this, Monday's swings sit in the database until the nightly job
+    reaches them, and the "What changed" feed lags a day. Isolated so a
+    detection error cannot turn a successful load into a failed run -- the
+    data is in; detection can be re-run.
+    """
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT))
+        import changes
+        import db
+        res = changes.compute_all(db.get_engine(), write=True)
+        res.pop("events", None)
+        print(f"\n=== change detection after load: {res} ===")
+    except Exception as e:                                  # noqa: BLE001
+        print(f"\n=== change detection after load FAILED (data is loaded; "
+              f"re-run detection): {type(e).__name__}: {e} ===")
 
 
 def main(argv: list[str]) -> int:

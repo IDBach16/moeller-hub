@@ -369,6 +369,21 @@ ai_summaries = Table(
     Column("created_at", DateTime, server_default=func.now()),
 )
 
+# One row per scheduled-job run. Exists because two of these jobs were dead for
+# months while every dashboard showed green: a cron's own logs are not a record
+# anyone reads, and "no error" is indistinguishable from "never ran". This is the
+# record. The nightly job writes it last, so a missing row for last night means
+# the job did not finish -- which is exactly the question nobody could answer.
+job_runs = Table(
+    "job_runs", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("job", String(40), nullable=False),        # nightly | blast_weekly | ...
+    Column("ran_at", DateTime, server_default=func.now()),
+    Column("ok", Boolean, nullable=False),
+    Column("summary", JSON),                          # per-step results, freshness
+    Index("ix_job_runs_job_ran", "job", "ran_at"),
+)
+
 
 # ===========================================================================
 # Vocabularies -- single source of truth, as in Charting_App/db.py
