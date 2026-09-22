@@ -545,6 +545,24 @@ check("the assistant endpoint answers without an API key",
       r.status_code == 200 and "configured" in r.get_json().get("reply", ""),
       str(r.get_json())[:120])
 
+# The player's own chat under the note: same degrade-not-crash rule, and the two
+# fences that make it safe to put in front of a sixteen-year-old -- it never
+# names a teammate, and the tools that could are not even offered to the model.
+r = client.post(f"/api/players/{JACK}/ask", json={"messages": [{"role": "user", "text": "hi"}]})
+check("the player chat answers without an API key",
+      r.status_code == 200 and "configured" in r.get_json().get("reply", ""),
+      str(r.get_json())[:120])
+_plow = agent.PLAYER_CHAT.lower()
+check("  it never names another player", "never name" in _plow and "another player" in _plow)
+check("  and bans body mechanics the same way", "do not prescribe body mechanics" in _plow)
+_names = {t["name"] for t in agent.TOOLS}
+check("  and withholds the teammate and coach-action tools",
+      {"compare_pitchers", "staff_leaderboard", "propose_goal", "propose_intervention"}
+      <= agent.PLAYER_TOOL_DENY and agent.PLAYER_TOOL_DENY <= _names,
+      f"unknown tool names in deny set: {sorted(agent.PLAYER_TOOL_DENY - _names)}")
+r = client.post(f"/api/players/{JACK}/ask", json={"messages": []})
+check("  and an empty question is refused, not answered", r.status_code == 400)
+
 
 print()
 if FAILS:

@@ -378,6 +378,36 @@ tr:last-child td{border-bottom:none}
 .pill.bad{background:rgba(227,127,127,.15);color:#e79a9a}
 .pill.flat{background:rgba(255,255,255,.08);color:rgba(255,255,255,.55)}
 
+/* ===== chat bubbles, chips and input (shared by every chat: the coordinator
+   chats on the Players tabs and "Ask the analyst" on a player's profile) ===== */
+.ag-msgs{display:flex;flex-direction:column;gap:.55rem;padding:.9rem 1.3rem;
+  max-height:420px;overflow-y:auto}
+.ag-msgs:empty{display:none}
+.ag-msg{max-width:88%;padding:.6rem .85rem;border-radius:12px;font-size:.88rem;
+  line-height:1.55;white-space:pre-wrap;word-wrap:break-word}
+.ag-me{align-self:flex-end;background:var(--gold-dim);
+  border:1px solid var(--glass-border);border-bottom-right-radius:4px}
+.ag-bot{align-self:flex-start;background:rgba(15,15,30,.6);
+  border:1px solid rgba(255,255,255,.08);border-bottom-left-radius:4px}
+.ag-bot a{color:var(--gold-light);text-decoration:underline;text-underline-offset:2px}
+.ag-typing{align-self:flex-start;color:var(--gold);letter-spacing:.2em;
+  padding:.3rem 1.3rem;animation:agPulse 1.2s ease-in-out infinite}
+@keyframes agPulse{0%,100%{opacity:.35}50%{opacity:1}}
+.ag-chips{display:flex;gap:.45rem;flex-wrap:wrap;padding:.5rem 1.3rem .2rem}
+.ag-chip{padding:.42rem .8rem;border:1px solid var(--glass-border);
+  border-radius:999px;color:var(--gold);font-size:.77rem;cursor:pointer;
+  user-select:none;transition:all .2s}
+.ag-chip:hover{background:var(--gold-dim);border-color:var(--gold)}
+.ag-input{display:flex;gap:.5rem;padding:.8rem 1.3rem 1rem}
+.ag-input input{flex:1;padding:.65rem .85rem;background:rgba(15,15,30,.75);
+  border:1px solid var(--glass-border);border-radius:9px;color:var(--white);
+  font-size:.92rem;font-family:inherit;outline:none}
+.ag-input input:focus{border-color:var(--gold)}
+.ag-input button{padding:.65rem 1.2rem;border:none;border-radius:9px;cursor:pointer;
+  background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy);
+  font-weight:700;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+.ag-input button:disabled{opacity:.5;cursor:wait}
+
 /* ===== agent reply rendering (shared by both chats) ===== */
 .mc p{margin:0 0 .6rem}
 .mc p:last-child{margin-bottom:0}

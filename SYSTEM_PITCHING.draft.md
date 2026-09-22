@@ -305,3 +305,16 @@ slider showed 122°; the true circular per-pitch axis is 7°). Fixed in `rapsodo
 `build_context` (`stuff_by_pitch.spin_axis`; `recent_sessions` no longer carries
 `spin_axis`). `<what_you_are_given>` updated to say so. Without this, every axis rule
 above was unusable.
+
+### `watch` rewritten (2026-09-22, after Ian's read of Cooper Homoelle's note)
+The first live note reproduced the spec's own example sentences almost verbatim ("throw
+ten changeups trying to hit the catcher's feet", "ask Coach whether a two-seam fits your
+slot"), stacked three cues from the changeup cue line into one item, and lectured in
+second person ("You are chasing…"). Ian: less direct, more of a concise overview.
+Levers: (1) register set to the page label — "Worth checking", pointers not orders;
+(2) one sentence per item, ~25 words, about him never to him; (3) each item names the
+number that would show it worked, so the next pen can answer it; (4) the illustrations
+are on other pitches and marked never-reuse; (5) cue preamble: one cue as a phrase,
+never the list. Pressure-tested on the same context without writing: the item became
+"Worth a pen of changeups thrown with the palm inside the ball, watching whether its
+axis moves a full hour off the fastball's 1:14 and its run clears 15 inches."

@@ -96,6 +96,27 @@ filling before the prompts lean on it.
 The `prompt-builder` skill is set up for this job — it interviews and drafts. Run
 it once per side.
 
+## "Ask the analyst" -- the player's own chat (2026-09-22)
+
+Under the note on a profile page. `POST /api/players/<id>/ask` ->
+`agent.answer_for_player()` -> `agent.answer(..., player=...)`. Same agent and
+same cached prompt prefix as the coordinator chats; two things differ and both
+are **enforced in code, not asked for in the prompt**:
+
+- his `build_context()` object and his current parsed note ride in the system
+  prompt (`agent.PLAYER_CHAT`), so answers are grounded before any tool call and
+  the chat can explain the note line by line;
+- `agent.PLAYER_TOOL_DENY` withholds the tools that name teammates or draft
+  coach actions (`compare_pitchers`, `staff_leaderboard`, `propose_*`, ...), so
+  "who is better than me" cannot be answered even if the model reaches for it.
+
+Register is second person, plain English, no body mechanics (same fence as the
+note, with the one-cue allowance), no goals/interventions, 3-6 sentences. The
+bubble/chip/input CSS lives in `base.html` now, shared with the Players tabs.
+`test_agent.py` checks the endpoint degrades without a key, the two fences, and
+that every denied name is a real tool. Rate-limited per IP like the other chats;
+the hub is public with the gate off, so this costs a model call per question.
+
 ## Thresholds are calibrated, not placeholders (2026-09-21)
 
 `metrics.py` `mmc` values were set from a season of our own data. Method: per

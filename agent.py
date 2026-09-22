@@ -1649,6 +1649,78 @@ FOCUS_WORDS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# The player's own chat -- "Ask the analyst" under the note on his profile
+# ---------------------------------------------------------------------------
+#
+# Same agent, different reader. The coordinator chats talk to a coach about the
+# group; this talks to ONE player about HIS numbers, on his own page. Two things
+# change and both are enforced here rather than hoped for in the prompt: his
+# computed context and current note ride in the system prompt so the answer is
+# grounded before any tool is called, and the tools that name teammates or draft
+# coach actions are withheld, so "who's better than me" cannot be answered even
+# if the model reaches for it.
+PLAYER_TOOL_DENY = {
+    "compare_pitchers", "staff_leaderboard", "group_overview", "list_players",
+    "roster_alerts", "protocol_status",            # other players by name
+    "propose_goal", "propose_intervention",        # coach actions
+    "build_report", "app_links",                   # not for this surface
+}
+
+PLAYER_CHAT = """<player_chat>
+You are now talking with {name} himself, or a coach sitting next to him, on his own
+profile page. Everything in <his_data> is HIS, already computed by the database, and
+<his_current_note> is the analyst note on the page above the chat, so you can explain
+it line by line. Answer from these first; reach for a tool only when the question
+needs history they do not carry, and only ever about him.
+
+- Talk to him plainly, in the second person, and translate every metric the way the
+  plain-English glossary does. Assume he has never been taught these words.
+- Every number you use is his: from his data, his note, or a tool call about him.
+  Never name, quote or rank another player. His percentile against his pool is
+  fine; "who is better" is not a question you answer.
+- Do not prescribe body mechanics. How he moves belongs with his coach and video.
+  You may offer one grip, seam or intent cue as something to try, never as an
+  instruction.
+- Do not propose goals or interventions; those are the coach's tools. If he asks
+  what to work on, walk him through the note's "worth checking" items and the
+  question worth taking to his coach.
+- Keep it short: three to six sentences unless he asks for detail. No headings;
+  dash bullets are fine.
+- If the answer is not in his data, say so, and say what would answer it: a bullpen
+  on the Rapsodo, a tagged cage session, a game.
+- No links to other pages or apps unless he asks where to find something.
+
+<his_data>
+{context}
+</his_data>
+
+<his_current_note>
+{note}
+</his_current_note>
+</player_chat>"""
+
+
+def answer_for_player(history, ip, engine, player_id):
+    """The profile-page chat: scoped to one player, grounded in his own context.
+
+    Builds the same compact object the analyst note is written from, attaches
+    the cached note if there is one, and picks the side off his role so a
+    pitcher gets the pitch-design framework and a hitter does not.
+    """
+    import summaries
+    ctx = summaries.build_context(engine, player_id)
+    if not ctx or not ctx.get("player"):
+        return "I can't find that player's data."
+    hit = summaries.cached(engine, player_id) or {}
+    note = summaries.parse_note(hit.get("summary")) if hit.get("summary") else None
+    focus = "pitching" if ctx.get("role") == "pitcher" else "hitting"
+    player = {"name": ctx["player"],
+              "context": json.dumps(ctx, default=str),
+              "note": json.dumps(note, default=str) if note else "(no note written yet)"}
+    return answer(history, ip, focus=focus, player=player)
+
+
 # Hub routes a link may point at. Anything else relative is not a page.
 # "/" is matched exactly, never as a prefix -- as a prefix it would let every
 # relative path through, which is the whole thing this guard exists to stop.
@@ -1706,11 +1778,14 @@ def answer_with_proposals(history, ip, focus=None):
     return text, drafts
 
 
-def answer(history, ip, focus=None):
+def answer(history, ip, focus=None, player=None):
     """history: list of {'role': 'user'|'assistant', 'text': str}. Returns reply text.
 
     focus: 'pitching' | 'hitting' scopes the conversation to one side of the
     roster -- the Players tabs use it so each tab has its own coordinator.
+    player: {'name', 'context', 'note'} makes it the player's own chat -- see
+    answer_for_player(). His data rides in the prompt and the teammate-naming
+    and coach-action tools are withheld.
     """
     _check_rate(ip)
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -1741,6 +1816,12 @@ def answer(history, ip, focus=None):
         import summaries
         system_blocks.append({"type": "text",
                               "text": summaries.PITCHING_KNOWLEDGE})
+    # Last, so every cached block above is shared with the coach chats and only
+    # this player's own data is the uncached tail.
+    tools = TOOLS
+    if player:
+        system_blocks.append({"type": "text", "text": PLAYER_CHAT.format(**player)})
+        tools = [t for t in TOOLS if t["name"] not in PLAYER_TOOL_DENY]
 
     client = _anthropic()
     for _ in range(6):
@@ -1749,7 +1830,7 @@ def answer(history, ip, focus=None):
             max_tokens=8000,
             output_config={"effort": "medium"},  # snappy enough for a chat widget
             system=system_blocks,
-            tools=TOOLS,
+            tools=tools,
             messages=messages,
         )
 

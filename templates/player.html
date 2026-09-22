@@ -227,6 +227,13 @@ a.pctyear:hover{color:var(--gold-light);background:rgba(255,255,255,.05)}
   font-size:.68rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
   color:rgba(255,255,255,.55)}
 .note-gh .rap-sw{margin-right:0}
+/* "Ask the analyst" -- the player's own chat under the note. Bubbles, chips and
+   the input are the shared .ag-* rules in base.html; only the head is local. */
+.ask{margin-top:1.2rem;border-top:1px solid var(--glass-border);padding-top:.9rem}
+.ask-head h3{margin:0 0 .25rem;font-size:.68rem;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--gold)}
+.ask-head .hint{margin:0 0 .3rem;font-size:.78rem;color:rgba(255,255,255,.45);line-height:1.5}
+.ask .ag-msgs,.ask .ag-chips,.ask .ag-input{padding-left:0;padding-right:0}
 .note-watch{margin-top:1rem;background:var(--gold-dim);
   border:1px solid rgba(197,165,90,.25);border-radius:8px;padding:.7rem .95rem}
 .note-watch h3{margin:0 0 .4rem;font-size:.68rem;letter-spacing:.09em;
@@ -529,6 +536,39 @@ td.strong{color:var(--white);font-weight:700}
         {% if p.ai_summary and p.ai_summary.summary %}Rewrite{% else %}Write one now{% endif %}
       </button>
       <span class="muted" id="sumMsg"></span>
+    </div>
+
+    {# The player's own line to the analyst. Same agent as the coordinator chats,
+       scoped to him: his context and the note above ride in the prompt, and the
+       tools that name teammates or draft coach actions are withheld server-side
+       (agent.answer_for_player). Bubble/chip/input styles are in base.html. #}
+    <div class="ask" id="askBox">
+      <div class="ask-head">
+        <h3>Ask the {{ 'pitching' if p.player.is_pitcher else 'hitting' }} analyst</h3>
+        <p class="hint">About your own numbers on this page &mdash; what a word means, why a
+          pitch reads the way it does, what the note is asking you to try. Anything about
+          how you move is a conversation with your coach, not with this.</p>
+      </div>
+      <div class="ag-msgs" id="askMsgs"></div>
+      <div class="ag-chips" id="askChips">
+        {% if p.player.is_pitcher %}
+        <span class="ag-chip">What kind of arm am I?</span>
+        <span class="ag-chip">What is working for me right now?</span>
+        <span class="ag-chip">Is my changeup different enough from my fastball?</span>
+        <span class="ag-chip">What does spin efficiency mean for my slider?</span>
+        <span class="ag-chip">Am I getting better?</span>
+        {% else %}
+        <span class="ag-chip">What is working in my swing right now?</span>
+        <span class="ag-chip">What does on-plane efficiency mean?</span>
+        <span class="ag-chip">Which drill do my numbers look best in?</span>
+        <span class="ag-chip">Am I getting better?</span>
+        {% endif %}
+      </div>
+      <div class="ag-input">
+        <input type="text" id="askText" maxlength="500"
+               placeholder="Ask about your numbers&hellip;"/>
+        <button id="askSend">Ask</button>
+      </div>
     </div>
   </section>
 
@@ -1767,6 +1807,61 @@ document.querySelectorAll('.ivEval').forEach(b => b.addEventListener('click', as
   });
 
   render();
+})();
+</script>
+
+<script>
+/* "Ask the analyst": one player, his own numbers. History lives in this tab
+   only; nothing is stored. Replies render through the shared MoeChat renderer
+   so links and numbers look the same as in the coach chats. */
+(function(){
+  const msgs  = document.getElementById('askMsgs');
+  const input = document.getElementById('askText');
+  const send  = document.getElementById('askSend');
+  const chips = document.getElementById('askChips');
+  if(!msgs || !input || !send) return;
+  const hist = [];
+  let busy = false;
+
+  function bubble(cls, text){
+    const el = document.createElement('div');
+    el.className = 'ag-msg ' + cls;
+    if(cls === 'ag-bot'){ el.innerHTML = MoeChat.render(text); } else { el.textContent = text; }
+    msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
+    return el;
+  }
+
+  async function ask(q){
+    q = (q || '').trim();
+    if(!q || busy) return;
+    busy = true; send.disabled = true; input.value = '';
+    if(chips) chips.style.display = 'none';
+    bubble('ag-me', q); hist.push({role:'user', text:q});
+    const typing = document.createElement('div');
+    typing.className = 'ag-typing'; typing.textContent = '•••';
+    msgs.appendChild(typing); msgs.scrollTop = msgs.scrollHeight;
+    try{
+      const r = await fetch('/api/players/' + PLAYER_ID + '/ask',
+        {method:'POST', headers:{'Content-Type':'application/json'},
+         body: JSON.stringify({messages: hist})});
+      const d = await r.json().catch(function(){ return {}; });
+      typing.remove();
+      const reply = (r.ok && d.reply) ? d.reply
+                  : (d.error || 'Something went wrong — try again.');
+      bubble('ag-bot', reply);
+      if(r.ok && d.reply) hist.push({role:'assistant', text:d.reply});
+    }catch(e){
+      typing.remove();
+      bubble('ag-bot', 'Could not reach the analyst.');
+    }finally{
+      busy = false; send.disabled = false; input.focus();
+    }
+  }
+
+  send.addEventListener('click', () => ask(input.value));
+  input.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); ask(input.value); } });
+  if(chips) chips.querySelectorAll('.ag-chip').forEach(c =>
+    c.addEventListener('click', () => ask(c.textContent)));
 })();
 </script>
 {% endblock %}

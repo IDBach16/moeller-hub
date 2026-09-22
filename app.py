@@ -786,6 +786,26 @@ def create_app():
         except Exception as e:
             return jsonify({"error": f"Could not write a summary: {e}"}), 500
 
+    @app.route("/api/players/<int:player_id>/ask", methods=["POST"])
+    def api_player_ask(player_id):
+        """'Ask the analyst' under the note on a player's profile. Scoped to him:
+        his own context rides in the prompt and teammate-naming tools are
+        withheld (agent.answer_for_player). Read-only; costs one model call,
+        rate-limited per IP like the other chats."""
+        import agent
+        d = request.get_json(silent=True) or {}
+        msgs = d.get("messages") or []
+        if not isinstance(msgs, list) or not msgs or len(msgs) > 40:
+            return jsonify({"error": "no question asked"}), 400
+        ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+              or request.remote_addr or "?")
+        try:
+            return jsonify({"reply": agent.answer_for_player(msgs, ip, _engine(), player_id)})
+        except agent.RateLimited as e:
+            return jsonify({"error": str(e)}), 429
+        except Exception as e:                              # noqa: BLE001
+            return jsonify({"error": f"Could not answer: {e}"}), 500
+
     @app.route("/api/groups/<side>/chat", methods=["POST"])
     def api_group_chat(side):
         """The pitching / hitting coordinator chat on the Players tabs."""
