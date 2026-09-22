@@ -114,8 +114,10 @@ Register is second person, plain English, no body mechanics (same fence as the
 note, with the one-cue allowance), no goals/interventions, 3-6 sentences. The
 bubble/chip/input CSS lives in `base.html` now, shared with the Players tabs.
 `test_agent.py` checks the endpoint degrades without a key, the two fences, and
-that every denied name is a real tool. Rate-limited per IP like the other chats;
-the hub is public with the gate off, so this costs a model call per question.
+that every denied name is a real tool. Rate-limited per IP like the other chats,
+and behind the password gate: `HUB_PASSWORD` IS set on this project's `web`
+(unlike the coaches' hub in `feisty-luck`, where the gate is off), so `/players/<id>`
+and `/api/players/<id>/ask` both 302 to `/login` for anyone not signed in.
 
 ## Thresholds are calibrated, not placeholders (2026-09-21)
 
