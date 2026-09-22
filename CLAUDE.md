@@ -49,7 +49,12 @@ The same knowledge is shared with the pitching-side chat: it lives in
 The note-specific parts — role, output contract, reading order — stay in
 `SYSTEM_PITCHING` alone, because the chat has no note schema.
 
-`SYSTEM_PITCHING.draft.md` is the same text with its sourcing notes.
+`SYSTEM_PITCHING.draft.md` is the same text with its sourcing notes, and
+`PITCHING_RESEARCH.md` holds the 2026-09-22 research pass (Driveline, Rapsodo's
+own guides, Tread, FanGraphs). **Ian's rule from that pass: Rapsodo-measured
+numbers only** — Trackman / Hawk-Eye / Statcast figures are a different system
+and stay out of the prompt; their reasoning (mirroring, ride-follows-slot,
+slider fault signatures, sinker arms judged on contact) came in as principles.
 
 **The order matters: CONTEXT FIRST, THEN PROMPT.** The model never sees raw data —
 `build_context()` hands it a compact object (4,623 chars for JJ Skeldon) and the
@@ -70,6 +75,15 @@ Candidates raised, none built:
   thrown that day, so a blended induced vertical break describes no pitch he
   actually throws, and arsenal work was impossible without it. 24 of 30 pitchers
   carry it. The hitting equivalent is `percentiles.blast_strip()`
+- **spin axis per pitch (done 2026-09-22).** `rapsodo_card` now puts a
+  circular-mean `axis` (degrees) and `axis_clock` on every mix row; `by_pitch`
+  passes them through beside the bars (never ranked, never drawn) and
+  `build_context` prints them in `stuff_by_pitch`. Before this the model's only
+  axis was `recent_sessions.spin_axis` — an ARITHMETIC mean pooled across every
+  pitch type thrown that day. Glotfelty's slider read 122° that way; the circular
+  per-pitch figure is 7°. That key is now dropped from `recent_sessions` on
+  purpose. Every axis rule in the prompt (separation, the changeup's hour of
+  tilt, mirroring, the per-pitch axis bands) was dead text until this landed.
 - correlations inside his own swing (does attack angle move with bat speed?)
 - game-vs-cage cross-reference — the hitting twin of the Glotfelty finding: is he
   practising the swing he actually uses?
@@ -502,32 +516,51 @@ and the weekly notes had no trigger at all (spec 12.1 #5 was never done).
 - The Blast puller runs detection itself after a committed load, so Monday's
   swings are visible Monday morning rather than after that night's run.
 
-**A `cronSchedule` persists when you drop it from railway.json.** Config-as-code
-only sets keys that are present, so "deploy without a cron to force a one-shot"
-works only on a service that never had one. To exercise the nightly code on
-demand: `railway ssh --service web "python nightly.py"` (vendor creds are absent
-on web by design; that step fails, the rest runs for real). Judge by `job_runs`.
+**⚠ `railway.json`'s `deploy.startCommand` and `deploy.cronSchedule` are NOT what
+Railway runs (found 2026-09-21).** The file's builder / `dockerfilePath` / restart
+policy do get merged into each deployment, but the schedule and start command
+that count are the **service-instance settings** — what the dashboard shows.
+For months rapsodo-cron's instance had cron `0 0 * * *` (midnight UTC = 8 PM ET)
+and **no start command** while the file said `0 9 * * *` / `python nightly.py`;
+blast-cron had no schedule at all. Symptoms: a "failed" run every night at 8 PM
+ET (the Procfile's gunicorn crashing on SECRET_KEY), nothing at 5 AM ET, no
+Monday Blast pull, and `railway logs` showing only "Stopping Container".
 
-**Config-as-code cannot be replaced by IaC for these crons (checked 2026-09-21).**
-`railway config migrate` emits `cronSchedule`, `builder` and restart policy only
-as *comments* — the `.railway/railway.ts` schema does not carry them. So the
-untracked `railway.json` remains the only CLI route, with the swap-and-restore
-dance for blast-cron. The clean fix is to set each cron's start command and
-schedule **in the Railway dashboard** and delete `railway.json`; that needs a
-person, not the CLI.
+Set them through the API — no dashboard needed, IDs from `railway status --json`:
+
+    railway api 'mutation($env:String!,$sid:String!,$in:ServiceInstanceUpdateInput!){
+        serviceInstanceUpdate(environmentId:$env, serviceId:$sid, input:$in) }'       --raw-var env=<environmentId> --raw-var sid=<serviceId>       --var 'in={"startCommand":"python nightly.py","cronSchedule":"0 9 * * *","restartPolicyType":"NEVER"}'
+
+then `railway up` so a deployment carries them. Read back with a `serviceInstance`
+query — **`nextCronRunAt` is the scheduler's truth**, deployment manifests are
+not. `builder: DOCKERFILE` is not an API enum (HEROKU/NIXPACKS/PAKETO/RAILPACK):
+set `dockerfilePath` and Railway builds from it. Current settings: rapsodo-cron
+`0 9 * * *` + `python nightly.py`; blast-cron `0 12 * * 1` + `dockerfilePath
+blast/Dockerfile` (command is the Dockerfile CMD). `railway.json` stays on disk
+as a matching copy so `railway up` never disagrees with the instance.
+
+**A service with a cron schedule does not run when deployed; a service with no
+schedule runs once on every deploy** (that is how Blast's first two loads
+happened, at deploy time, not at noon). To exercise the nightly code on demand,
+run it inside the web container with the cron's own variables, never printed:
+`railway variables --service rapsodo-cron --json` → keep RAPSODO_/GMAIL_/ALERT_
+→ base64 → `railway ssh --service web "echo <b64> | base64 -d > /tmp/e; set -a;
+. /tmp/e; set +a; rm /tmp/e; python nightly.py"`. Judge by `job_runs`.
 
 **Windows tasks — S4U split (2026-09-21).** `Moeller Daily Check`, `Moeller
 Weekly Reports` and `Moeller Update AWRE Data` now run as `S4U` (whether or not
-anyone is logged in; tested, result 0). The four that `git push` — Video Scout,
-Pitch Overlay, Umpire Cards, HitTrax Weekly — stay `Interactive`: an S4U logon
+anyone is logged in; tested, result 0). The three that `git push` — Video Scout,
+Pitch Overlay, HitTrax Weekly — stay `Interactive`: an S4U logon
 cannot open the Windows Credential Store, so Git Credential Manager fails under
 it. Moving those needs `LogonType Password`, i.e. Ian re-registering them with
 his Windows password. `_pipeline\Set_S4U.ps1` (`-Revert` to undo).
 
 ## Deployment
 
-Project `feisty-luck` runs three services: `web` (live hub, from GitHub `main`),
-`Postgres`, and `rapsodo-cron` (`python rapsodo/daily.py`, `0 9 * * *`).
+Project `wonderful-abundance` runs four services: `web` (this branch, from GitHub
+`player-development-system`), `Postgres`, `rapsodo-cron` (`python nightly.py`,
+`0 9 * * *`) and `blast-cron` (`blast/Dockerfile`, `0 12 * * 1`). The live
+coaches' hub is a different project, `feisty-luck`.
 
 - **`railway.json` must stay an ordinary untracked file.** `railway up` walks the
   directory with git's ignore rules and honours **both** `.gitignore` and

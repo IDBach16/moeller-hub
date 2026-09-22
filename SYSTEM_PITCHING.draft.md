@@ -271,3 +271,37 @@ Before you finish, check that every number you used appears in the context and t
 no parent is repeated.
 </rules>
 ```
+
+---
+
+## Additions 2026-09-22 — from the wider research pass (see PITCHING_RESEARCH.md)
+
+Ian's rule for this pass: **Rapsodo-measured numbers only**; concepts from other systems
+come in as reasoning, never as figures.
+
+| Where | What was added | Source of the idea |
+|---|---|---|
+| 2-seam profile | lively 10–13" ride with 18"+ run; seam effects exist but Rapsodo cannot see them — never claim one | Rapsodo break-profile guide; Driveline SSW |
+| Cutter profile | band 45–65 with both failure modes (flattens above, becomes slider below) | Rapsodo fastball-efficiency guide |
+| Gyro slider | efficiency < 10 (was "under 20, 15–30"); pairs with a four-seam | Rapsodo, RPP |
+| Sweeping slider | 15–40; over 40 is a slurve; the three slider faults with data signatures | RPP slider/sweeper |
+| Change-up profile | supinator signature and the kick change as a question for the coach | Tread / ESPN / FanGraphs |
+| Dead zone | Rapsodo calls it the flat zone | Rapsodo |
+| New: EVERYTHING IS RELATIVE TO HIS FASTBALL | secondaries graded by distance from his own fastball | Driveline Stuff+ (idea only) |
+| New: MIRRORING | FB↔CB axes ~180° apart, within ~10° | FanGraphs spin mirroring |
+| which_shape_should_he_chase | ride follows slot; flat arrival from a low release, said as a principle, no number | Fastball+ regression, VAA literature (ideas only) |
+| cues | gyro: football spiral; new "needs more sweep" cue; new kick-change cue; cutter band 45–65 | RPP, Tread |
+| how_to_read | new step 3 mirror check (now ten steps); step 8 sinker arms judged on strikes and contact | — |
+| rules | sinker arms and whiff%; ride moves with location | Pitcher List; FanGraphs release angles |
+
+Not added on purpose: MLB / college / PBR benchmark numbers (different tracking systems);
+VAA tiers; expected-IVB coefficients; kick-change Statcast profiles.
+
+### Context change that came with it (same day)
+Checked the prompt against a real production context (Rudy Glotfelty) and found the
+model had **no per-pitch spin axis** — only a pooled, arithmetic session mean (his
+slider showed 122°; the true circular per-pitch axis is 7°). Fixed in `rapsodo_card`
+(`axis`, `axis_clock` per mix row), `percentiles._one` (passed through, unranked) and
+`build_context` (`stuff_by_pitch.spin_axis`; `recent_sessions` no longer carries
+`spin_axis`). `<what_you_are_given>` updated to say so. Without this, every axis rule
+above was unusable.

@@ -107,7 +107,10 @@ def _one(cards, player_id, pitch, level):
                      "pct": rank, "ord": ordinal(rank)})
     if not bars:
         return None
+    # The axis rides along beside the bars, not as one: it is never ranked and
+    # the page does not draw it. The analyst context is what reads it.
     return {"pitch": pitch, "n": mine["n"], "bars": bars,
+            "axis": mine.get("axis"), "axis_clock": mine.get("axis_clock"),
             "pool": pool_label, "pool_n": len(pool), "level": level}
 
 

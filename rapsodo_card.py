@@ -59,6 +59,21 @@ def _circular_mean(degs):
     return math.degrees(math.atan2(y, x)) % 360
 
 
+def _axis(degs, min_n=3):
+    """A pitch type's spin axis in whole degrees, or None below the floor."""
+    m = _circular_mean(degs) if len(degs) >= min_n else None
+    return None if m is None else int(round(m)) % 360
+
+
+def _clock(deg):
+    """Degrees to the clock reading the published targets use: 0 = 12:00,
+    30 = 1:00, 315 = 10:30. Thirty degrees an hour, so two minutes a degree."""
+    if deg is None:
+        return None
+    h, m = divmod(int(round(deg * 2)), 60)
+    return f"{h or 12}:{m:02d}"
+
+
 def _slot_from_axis(axis_mean):
     """Arm angle above horizontal, inferred from fastball spin axis (0 = 12:00).
     Same method as the Rapsodo dashboard: tilt tracks the arm and, unlike
@@ -126,8 +141,15 @@ def roster_cards(engine):
         zone = d.get("is_strike", [])
         card["_strikes"] += int(sum(zone))
         card["_zone_n"] += len(zone)
+        # Spin axis per PITCH, as a circular mean. This is the only place a
+        # single pitch's axis exists for the analyst: the session view pools
+        # every pitch type thrown that day, and a pooled axis -- let alone an
+        # arithmetic one -- is meaningless. Never ranked: an axis is compared
+        # with the same pitcher's other pitches, not across arms.
+        ax = _axis(d.get("spin_axis", []))
         card["mix"].append({
             "pt": pt, "n": len(velos),
+            "axis": ax, "axis_clock": _clock(ax),
             "velo": round(sum(velos) / len(velos), 1),
             "max": round(max(velos), 1),
             "spin": round(sum(d["spin_rate"]) / len(d["spin_rate"]))
