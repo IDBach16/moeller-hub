@@ -404,8 +404,8 @@ carries `provisional=True` and the panel says so:
 - `HARD_HIT_MPH = 90` (MLB's 95 is a pro number)
 - `SWEET_SPOT_DEG = (8, 32)` (Statcast's band)
 - ranked: exit velocity, max exit velocity, hard-hit %, sweet-spot %, max
-  distance. Chips only: launch angle (target band), spray (a tendency), xwOBA
-  (vendor composite -- same reason Blast's Rotation Score is excluded)
+  distance. Chips only: launch angle (target band), spray (a tendency). xwOBA is
+  loaded but not shown (Ian, 2026-09-23) -- a vendor composite anyway
 
 **Rapsodo only.** HitTrax also produces exit velocity / launch angle / distance
 but is a different measurement system; it gets its own panel when it lands,

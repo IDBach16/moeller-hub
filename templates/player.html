@@ -838,8 +838,8 @@ td.strong{color:var(--white);font-weight:700}
         {%- set short = unranked|selectattr('small')|list -%}
         {%- if short %}Not ranked &mdash; too few batted balls in any one drill yet
           ({{ short[0].n }} of {{ short[0].need }}).
-        {%- else %}Measured, not ranked &mdash; launch angle is a target band, spray is
-          a tendency, and xwOBA is the vendor's own composite.{% endif %}</p>
+        {%- else %}Measured, not ranked &mdash; launch angle is a target band and
+          spray is a tendency; neither has a good end.{% endif %}</p>
       {% endif %}
       {% if batted.thin %}
       <p class="hint pctthin">Too few batted balls to show:

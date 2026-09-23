@@ -1017,8 +1017,8 @@ BATTED_STRIP = [
      "target band, not a high score"),
     ("launch_direction", "Spray", "deg", None, BATTED_MIN_N,
      "average direction off the bat"),
-    ("xwoba", "xwOBA", "", None, BATTED_MIN_N,
-     "Rapsodo's own composite -- shown, not ranked"),
+    # xwOBA is loaded (HIT_METRIC_MAP) but not shown -- Ian, 2026-09-23: "I
+    # don't need the xwoba." It is the vendor's composite anyway.
 ]
 
 _BATTED_KEYS = ("exit_velocity", "launch_angle", "distance", "launch_direction", "xwoba")
