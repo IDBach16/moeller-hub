@@ -129,6 +129,14 @@ def freshness(engine, today: date):
         newest = dict(conn.execute(
             select(db.sessions.c.source, func.max(db.sessions.c.session_date))
             .group_by(db.sessions.c.source)).all())
+        # Rapsodo is two devices under one login. A hitting session filed on
+        # 09-17 once made the pitching side read "current" while no arm had
+        # thrown since March, so the two are reported apart from here on.
+        by_type = {(r[0], r[1]): r[2] for r in conn.execute(
+            select(db.sessions.c.source, db.sessions.c.session_type,
+                   func.max(db.sessions.c.session_date))
+            .where(db.sessions.c.source == "rapsodo")
+            .group_by(db.sessions.c.source, db.sessions.c.session_type)).all()}
         landed = dict(conn.execute(
             select(db.raw_imports.c.vendor, func.max(db.raw_imports.c.uploaded_at))
             .group_by(db.raw_imports.c.vendor)).all())
@@ -161,6 +169,11 @@ def freshness(engine, today: date):
                     row["status"] = "ok"
         else:
             row["status"] = "pulled by this job"
+        if src == "rapsodo":
+            pit, hit = by_type.get(("rapsodo", "bullpen")), by_type.get(("rapsodo", "cage"))
+            row["newest_session"] = str(pit) if pit else None       # the pitching unit
+            row["newest_pitching"] = str(pit) if pit else None
+            row["newest_hitting"] = str(hit) if hit else None
         out[src] = row
     return {"sources": out, "stale": problems}
 
@@ -193,8 +206,9 @@ def compose(report: dict) -> tuple[str, str]:
     written = "-" if isinstance(notes.get("skipped"), str) else notes.get("written", 0)
 
     subject = (f"Moeller nightly {'OK' if ok else 'ATTENTION'} -- "
-               f"Rapsodo thru {d('rapsodo')}, Blast thru {d('blast')}, "
-               f"{fired} changes, {written} notes")
+               f"Rapsodo pitching thru {d('rapsodo', 'newest_pitching')}, "
+               f"hitting thru {d('rapsodo', 'newest_hitting')}, "
+               f"Blast thru {d('blast')}, {fired} changes, {written} notes")
 
     lines = [f"Nightly job -- {report['ran_at']}", ""]
     if report["problems"]:

@@ -385,6 +385,32 @@ Blast's **Rotation Score** is on their table and absent here on purpose: it is a
 Blast composite the export does not carry, and rotational acceleration is a
 different measurement, not a stand-in for it.
 
+### "Rapsodo" -- the batted-ball strip (2026-09-23)
+
+`percentiles.batted_strip()` is the Blast strip on the ball instead of the bat:
+Rapsodo batted balls from `swings` (source rapsodo), drill-adjusted, ranked
+against every Moeller hitter with Rapsodo cage data, unranked below the floor.
+Both cage strips run on one engine, `_drill_strip()`, so the doctrine cannot
+drift between them. It is the fourth entry in the "Where he ranks" dropdown,
+labelled just **"Rapsodo"** (Ian's call), and shows for anyone with batted
+balls, two-way players included.
+
+Defaults Ian set before a reliability sweep was possible -- every ranked bar
+carries `provisional=True` and the panel says so:
+
+- `BATTED_MIN_N = 15` balls in one drill before that drill counts
+- `HARD_HIT_MPH = 90` (MLB's 95 is a pro number)
+- `SWEET_SPOT_DEG = (8, 32)` (Statcast's band)
+- ranked: exit velocity, max exit velocity, hard-hit %, sweet-spot %, max
+  distance. Chips only: launch angle (target band), spray (a tendency), xwOBA
+  (vendor composite -- same reason Blast's Rotation Score is excluded)
+
+**Rapsodo only.** HitTrax also produces exit velocity / launch angle / distance
+but is a different measurement system; it gets its own panel when it lands,
+never this pool. Run `blast/reliability.py`-style session splits once ~10
+hitters have 25+ balls and drop anything under 0.60 before removing the
+provisional flag. `test_rapsodo.py` pins the shares and the never-ranked chips.
+
 ### The pool is Moeller, not "Blast standards"
 
 **They are in the repo now** (`metrics.BLAST_BENCHMARKS`, transcribed
@@ -496,6 +522,28 @@ Full reference: **`rapsodo/RECON.md`**. The parts that bite:
   disappears without an error.
 - **Failed radar tracks come back as ordinary rows with `speed: null`.** Keeping
   them dropped one pitcher's average fastball from 82.5 to 67.0. Always filter.
+- **Hitting sessions (`shotType` "hit") go to `db.swings` as `cage` sessions,
+  drill-tagged from `sessionType` through `metrics.normalize_context`** -- never
+  to `pitch_metrics`. `load_db.HIT_METRIC_MAP` maps `speed` to `exit_velocity`
+  (it is the ball off the bat there), plus launch angle, distance, direction,
+  pitch speed, batted-ball spin and xwOBA. Found 2026-09-23: the account's
+  first five hitting sessions (9/10 and 9/17) had gone through the PITCHING
+  map, so four position players carried a "bullpen" and a pitcher's batted
+  balls sat in his velocity history. A re-load repairs a wrongly filed session
+  in place (both tables cleared, type rewritten); `rapsodo/reload_from_db.py`
+  re-runs the loader over `raw_imports` because the cron's raw folder does not
+  survive the run. `test_rapsodo.py` reproduces the mis-load and the repair.
+- **A hitting session is a GROUP session: one Rapsodo id, many hitters.** The
+  2026-09-17 machine session had 30+ players under one id. Two things follow,
+  both found 2026-09-23 when an API check returned 40 player-sessions and the
+  archive held 7 files: `pull.py` names archive files `<session>__<player>.json`
+  (one file per id meant each hitter overwrote the last), and `sessions` is
+  unique on `(source, source_ref)`, so a hitting session's ref is
+  `"<sessionId>:<rapsodoPlayerId>"` -- pitching keeps the bare id. The loader
+  matches on ref AND player, with a legacy bare-ref match so rows filed before
+  this are repaired and re-keyed. Nothing in production had more than one
+  hitter per session before the fix; the rest of that day's ~400 balls need a
+  re-pull (`pull.py --start 2026-09-09`), not a re-load.
 - `pitchType` is an int enum: `0 FB · 3 CB · 4 SL · 5 SI · 6 CH`. Codes **1 and 2
   are deliberately unmapped** — too few pitches, too ambiguous a shape. Add a code
   only after confirming it against the vendor UI's own aggregates or with a coach.

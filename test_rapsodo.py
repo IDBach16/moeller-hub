@@ -348,6 +348,133 @@ check("a pitch-specific verdict names the pitch in its summary",
       "summaries exist but none name their pitch")
 
 
+# ---------------------------------------------------------------------------
+section("hitting sessions go to swings, not pitch_metrics")
+# ---------------------------------------------------------------------------
+# Rapsodo's Hitting unit returns shotType "hit" with a batted ball's exit speed
+# in the same `speed` field a pitch uses. On 2026-09-20 five such sessions went
+# through the pitching map and four position players got a "bullpen". This
+# reproduces that state, then proves a plain re-load repairs it.
+from datetime import date as _date  # noqa: E402
+
+(load_db.RAW_DIR / "hit").mkdir(parents=True, exist_ok=True)
+hitter = seed_player("Donovan", "Glosser", is_pitcher=False)
+
+
+def hit(hit_id, speed, **kw):
+    s = {"_id": f"h@{hit_id}", "hit_id": hit_id, "speed": speed,
+         "launchAngle": None if speed is None else 18.5,
+         "distance": None if speed is None else 193.0,
+         "direction": None if speed is None else -4.0,
+         "pitchBallSpeed": None if speed is None else 62.0,
+         "spin": None if speed is None else 1850.0, "xwobaScore": None if speed is None else 0.61}
+    s.update(kw)
+    return s
+
+
+def write_hit_session(session_id, player, shots, session_type="Live Batting Practice"):
+    payload = {"player": player,
+               "session": {"_id": session_id, "id": session_id, "playerId": player["_id"],
+                           "date": 1789072316, "startedAt": 1789072316,
+                           "sessionName": "untitled", "sessionType": session_type,
+                           "shotType": "hit", "deviceName": "hitting2.0"},
+               "shots": shots}
+    (load_db.RAW_DIR / "hit" / f"{session_id}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+# (5005 is a fresh Rapsodo id -- 3003 already belongs to a pitcher above.)
+# The wrong state first: the same session already filed as a bullpen with a
+# batted ball stored as a pitch velocity.
+with ENGINE.begin() as conn:
+    bad_sid = conn.execute(insert(db.sessions).values(
+        player_id=hitter, session_date=_date(2026, 9, 10), session_type="bullpen",
+        source="rapsodo", source_ref="hit_live").returning(db.sessions.c.id)).scalar()
+    conn.execute(insert(db.pitch_metrics).values(
+        session_id=bad_sid, player_id=hitter, seq=1, metric_key="velocity", value=75.1))
+
+write_hit_session("hit_live", make_player(5005, "Donovan", "Glosser"),
+                  [hit(500 + i, 75.0 + i) for i in range(6)] + [hit(599, None)])
+write_hit_session("hit_machine", make_player(5005, "Donovan", "Glosser"),
+                  [hit(600 + i, 80.0) for i in range(3)], session_type="Pitching Machine")
+stats = load_db.load(dry_run=False)
+with ENGINE.connect() as conn:
+    live = conn.execute(select(db.sessions).where(db.sessions.c.source_ref == "hit_live:5005")).first()
+    mach = conn.execute(select(db.sessions).where(db.sessions.c.source_ref == "hit_machine:5005")).first()
+    sw_live = conn.execute(select(db.swings).where(db.swings.c.session_id == live.id)).all()
+    pm_live = count(db.pitch_metrics, session_id=live.id)
+    sw_mach = conn.execute(select(db.swings).where(db.swings.c.session_id == mach.id)).all()
+
+check("a hitting session is stored as a cage session", live.session_type == "cage", live.session_type)
+check("  and the mis-filed bullpen was repaired in place, not duplicated",
+      live.id == bad_sid and count(db.sessions, source_ref="hit_live") == 0)
+check("  its batted balls are swings, not pitches",
+      pm_live == 0 and len(sw_live) > 0, f"pitch_metrics={pm_live} swings={len(sw_live)}")
+check("  exit speed lands as exit_velocity, one per valid batted ball",
+      sum(1 for r in sw_live if r.metric_key == "exit_velocity") == 6)
+check("  the failed track (speed=null) is dropped",
+      not any(r.seq == 7 for r in sw_live))
+check("  'Live Batting Practice' is the live drill", {r.context for r in sw_live} == {"live"},
+      str({r.context for r in sw_live}))
+check("  'Pitching Machine' is the machine drill", {r.context for r in sw_mach} == {"machine"},
+      str({r.context for r in sw_mach}))
+check("  the loader counts them separately from pitching",
+      stats["hit_sessions"] == 2 and stats["swings_written"] == len(sw_live) + len(sw_mach))
+check("  a batted ball never becomes a fastball velocity",
+      count(db.pitch_metrics, player_id=hitter) == 0)
+
+# A hitting session is a GROUP session: one Rapsodo id, many hitters. Two
+# hitters under the same id must become two sessions, not one overwriting the
+# other -- which is what lost ~400 batted balls from 2026-09-17 in production.
+hitter2 = seed_player("Shane", "Green", is_pitcher=False)
+write_hit_session("hit_group", make_player(5005, "Donovan", "Glosser"),
+                  [hit(700 + i, 78.0) for i in range(4)])
+payload = json.loads((load_db.RAW_DIR / "hit" / "hit_group.json").read_text())
+payload["player"] = make_player(4004, "Shane", "Green"); payload["session"]["playerId"] = 4004
+(load_db.RAW_DIR / "hit" / "hit_group__4004.json").write_text(json.dumps(payload), encoding="utf-8")
+load_db.load(dry_run=False)
+check("two hitters sharing one Rapsodo session id get two sessions",
+      count(db.sessions, source_ref="hit_group:5005") == 1 and count(db.sessions, source_ref="hit_group:4004") == 1)
+check("  and each keeps his own batted balls",
+      count(db.swings, player_id=hitter2) == 4 * len(load_db.HIT_METRIC_MAP))
+
+# ---------------------------------------------------------------------------
+section("the Rapsodo batted-ball strip")
+# ---------------------------------------------------------------------------
+# 16 live balls at known values: exit velocity alternating 95/85 (hard-hit 50%
+# at the 90 mph line, mean 90, max 95) and launch angle alternating 10/40
+# (sweet-spot 50% in 8-32). Above the per-drill floor, so he qualifies; only
+# one hitter in the field, so nothing can be RANKED -- the values must still
+# show, and the shares must be exact.
+import percentiles  # noqa: E402
+slugger = seed_player("Noah", "Kattus", is_pitcher=False)
+write_hit_session("hit_known", make_player(6006, "Noah", "Kattus"),
+                  [hit(800 + i, 95.0 if i % 2 == 0 else 85.0,
+                       launchAngle=10.0 if i % 2 == 0 else 40.0, distance=300.0 + i)
+                   for i in range(16)])
+load_db.load(dry_run=False)
+percentiles.clear_batted_cache()
+strip = percentiles.batted_strip(ENGINE, slugger)
+check("a hitter with Rapsodo cage data gets a batted-ball strip", strip is not None)
+vals = {b["label"]: b for b in (strip or {}).get("bars", [])}
+check("  exit velocity is his mean off the bat", vals.get("Exit velocity", {}).get("value") == 90.0, str(vals.get("Exit velocity")))
+check("  max exit velocity is his hardest ball", vals.get("Max exit velocity", {}).get("value") == 95.0)
+check("  hard-hit %% is the share at %g+ mph" % percentiles.HARD_HIT_MPH,
+      vals.get("Hard-hit %", {}).get("value") == 50.0, str(vals.get("Hard-hit %")))
+check("  sweet-spot % is the share inside the launch-angle band",
+      vals.get("Sweet-spot %", {}).get("value") == 50.0, str(vals.get("Sweet-spot %")))
+check("  max distance is his longest ball", vals.get("Max distance", {}).get("value") == 315.0)
+check("  launch angle is shown, never ranked",
+      vals.get("Launch angle", {}).get("no_rank") is True and vals.get("Launch angle", {}).get("pct") is None)
+check("  with one hitter in the field nothing is ranked, but nothing is hidden",
+      all(b.get("no_rank") for b in strip["bars"]) and len(strip["bars"]) >= 5)
+check("  the strip says how many balls fed it, and from which drill",
+      strip["balls"] == 16 and strip["drills"][0]["drill"] == "Live pitching", str(strip.get("drills")))
+check("  the Blast strip still works on the shared engine",
+      percentiles.blast_strip(ENGINE, slugger) is None)   # no Blast swings for him
+# A batted ball off a pitching-side hitter must never leak into the pitching
+# card: the strip reads swings, the card reads pitch_metrics.
+check("  and none of it touched pitch_metrics", count(db.pitch_metrics, player_id=slugger) == 0)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) FAILED:")

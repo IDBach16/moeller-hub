@@ -5,7 +5,7 @@ Rapsodo puller.
     Backfill: python src/pull.py --start 2025-08-19 --end 2026-08-19
 
 Writes two things per run:
-  raw/<shot_type>/<session_id>.json   the untouched API payload, kept forever so we can
+  raw/<shot_type>/<session_id>__<player_id>.json   the untouched API payload, kept forever so we can
                                       re-derive everything without re-hitting the API
   out/shots_<start>_<end>.csv         a flat table ready for the DB loader
 
@@ -82,7 +82,12 @@ def pull(start: datetime, end: datetime) -> pd.DataFrame:
                 # payload carries only `playerId` -- no name, no email -- so we
                 # stash the player record alongside it. Without this the archive
                 # can't be loaded on its own without re-querying /v3/reports.
-                raw_path = RAW_DIR / shot_type / f"{session_id}.json"
+                # Session AND player in the name. A hitting session is a group
+                # session -- one id, many hitters -- and a file per session id
+                # meant each hitter overwrote the last: 40 player-sessions in,
+                # 7 files out, on the 2026-09-23 check. Pitching sessions are one
+                # arm each, so this changes nothing for them.
+                raw_path = RAW_DIR / shot_type / f"{session_id}__{player_id}.json"
                 raw_path.parent.mkdir(parents=True, exist_ok=True)
                 raw_path.write_text(
                     json.dumps(

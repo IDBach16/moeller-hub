@@ -577,7 +577,7 @@ td.strong{color:var(--white);font-weight:700}
      against the arms he is measured with. Both are needed and neither
      substitutes for the other. One strip per pitch -- pooling a fastball's
      15" of ride with a slider's 2" would rank neither. #}
-  {% if strips or game_strip or game_bat or blast or blast_bench %}
+  {% if strips or game_strip or game_bat or blast or blast_bench or batted %}
   <section class="panel">
     <div class="rank-head">
       <div>
@@ -779,6 +779,71 @@ td.strong{color:var(--white);font-weight:700}
       {% if blast.thin %}
       <p class="hint pctthin">Too few swings to show:
         {% for t in blast.thin %}{{ t.label }} ({{ t.n }} of {{ t.need }})
+        {{- ', ' if not loop.last }}{% endfor %}.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+    {# ---- Rapsodo batted balls. The ball, not the bat: same drill-adjusted
+       doctrine as the Blast strip, its own pool (Rapsodo only -- HitTrax is a
+       different system and gets its own panel when it lands). Every rank is
+       provisional until the reliability sweep has run. ---- #}
+    {% if batted %}
+    <div class="pctblock" data-view="rapsodo" data-view-label="Rapsodo">
+      <div class="pcthead">
+        <span class="pctwhat">Rapsodo &mdash; batted balls in the cage</span>
+        <span class="pctyears"><span class="pctyear on">{{ batted.balls }} batted balls</span></span>
+      </div>
+      {% if batted.drills %}
+      <p class="hint pctmix">
+        {%- if batted.adjusted %}Adjusted for drill, then ranked against all
+          {{ batted.bars[0].pool_n }} hitters with Rapsodo cage data.{% else %}Ranked on
+          his raw averages: too few hitters work in more than one drill to
+          estimate the drill offset yet.{% endif %}
+        <span class="pctmixlist">From
+          {% for d in batted.drills %}{{ d.drill|lower }} {{ d.n }}{{ ', ' if not loop.last }}{% endfor %}.</span>
+      </p>
+      {% endif %}
+      {% set ranked = batted.bars|rejectattr('no_rank')|list %}
+      {% set unranked = batted.bars|selectattr('no_rank')|list %}
+      {% if ranked %}
+      <div class="pctgrid">
+        {% for b in ranked %}
+        <div class="pctbar">
+          <div class="pctrow">
+            <span class="pctlab">{{ b.label }}{% if b.lower_better %}<span class="lowb" title="Lower is better">&darr;</span>{% endif %}
+              {%- if b.blurb %}<span class="pctblurb">{{ b.blurb }}</span>{% endif %}</span>
+            <span class="pctval">{{ b.display }}<small>{{ b.unit }}</small></span>
+          </div>
+          <div class="pcttrack">
+            <div class="pctfill" style="width:{{ b.pct }}%"></div>
+            <div class="pctdot" style="left:{{ b.pct }}%"></div>
+          </div>
+          <div class="pctnum">{{ b.ord }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="hint pctthin">Ranks are provisional: these bars have not yet been
+        reliability-tested at Moeller sample sizes the way the rest of this page
+        has. Hard-hit is {{ '%g'|format(batted.hard_hit_mph) }}+ mph; sweet-spot is
+        {{ '%g'|format(batted.sweet_spot[0]) }}&ndash;{{ '%g'|format(batted.sweet_spot[1]) }}&deg; of launch angle.</p>
+      {% endif %}
+      {% if unranked %}
+      <div class="pctshown">
+        {% for b in unranked %}
+        <span class="pctchip" title="{{ b.blurb }}">{{ b.label }}
+          <b>{{ b.display }}<small>{{ b.unit }}</small></b></span>
+        {% endfor %}
+      </div>
+      <p class="pctwhy">
+        {%- set short = unranked|selectattr('small')|list -%}
+        {%- if short %}Not ranked &mdash; too few batted balls in any one drill yet
+          ({{ short[0].n }} of {{ short[0].need }}).
+        {%- else %}Measured, not ranked &mdash; launch angle is a target band, spray is
+          a tendency, and xwOBA is the vendor's own composite.{% endif %}</p>
+      {% endif %}
+      {% if batted.thin %}
+      <p class="hint pctthin">Too few batted balls to show:
+        {% for t in batted.thin %}{{ t.label }} ({{ t.n }} of {{ t.need }})
         {{- ', ' if not loop.last }}{% endfor %}.</p>
       {% endif %}
     </div>

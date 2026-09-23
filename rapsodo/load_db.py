@@ -42,7 +42,7 @@ if not (HUB_PATH / "db.py").exists():
 sys.path.insert(0, str(HUB_PATH))
 import db  # noqa: E402
 import metrics  # noqa: E402
-from sqlalchemy import delete, insert, select  # noqa: E402
+from sqlalchemy import delete, insert, select, update  # noqa: E402
 
 
 def _staff_names() -> set:
@@ -93,6 +93,74 @@ PITCH_METRIC_MAP = {
     # competition strike rate.
     "isStrike": "is_strike",
 }
+
+# Rapsodo HITTING shots (shotType "hit" -- the Hitting unit, or the 2.0 unit
+# turned around). These go to db.swings, drill-tagged, exactly as Blast swings
+# do; they never touch pitch_metrics. Found the hard way on 2026-09-20: the
+# first five hitting sessions the account produced were loaded through the
+# pitching map above, so a batted ball's exit speed became a "pitch velocity"
+# and four position players got a bullpen on their profile.
+HIT_METRIC_MAP = {
+    "speed": "exit_velocity",            # ball speed off the bat, mph
+    "launchAngle": "launch_angle",       # deg
+    "distance": "distance",              # ft
+    # Not registry metrics -- kept for plotting and later promotion.
+    "direction": "launch_direction",     # deg, spray
+    "pitchBallSpeed": "pitch_speed",     # the pitch he hit, mph
+    "spin": "batted_ball_spin",          # rpm
+    "xwobaScore": "xwoba",
+}
+
+
+def _pitch_rows(valid, player_id, stats):
+    rows = []
+    for seq, shot in enumerate(sorted(valid, key=lambda s: s.get("pitch_id") or 0), 1):
+        code = shot.get("pitchType")
+        ptype = map_pitch_type(code)
+        if ptype is None and code is not None:
+            stats["unmapped_pitch_types"][code] = (
+                stats["unmapped_pitch_types"].get(code, 0) + 1
+            )
+        ts = _stamp(shot.get("pitch_id"))
+        for field, key in PITCH_METRIC_MAP.items():
+            val = shot.get(field)
+            if val is None:
+                continue
+            rows.append({"player_id": player_id, "seq": seq, "ts": ts,
+                         "pitch_type": ptype, "metric_key": key, "value": float(val)})
+            # The registry tracks fastball velocity separately from overall
+            # velocity, and it's a headline metric.
+            if key == "velocity" and ptype == "FB":
+                rows.append({"player_id": player_id, "seq": seq, "ts": ts,
+                             "pitch_type": ptype, "metric_key": "fb_velocity",
+                             "value": float(val)})
+    return rows
+
+
+def _hit_rows(valid, player_id, context):
+    """db.swings rows. `context` is the drill (metrics.SWING_CONTEXTS) or None;
+    None means untagged, and an untagged swing contributes to no baseline --
+    the same rule as an unlabelled pitch."""
+    rows = []
+    for seq, shot in enumerate(
+            sorted(valid, key=lambda s: s.get("hit_id") or s.get("pitch_id") or 0), 1):
+        ts = _stamp(shot.get("hit_id") or shot.get("pitch_id"))
+        for field, key in HIT_METRIC_MAP.items():
+            val = shot.get(field)
+            if val is None:
+                continue
+            rows.append({"player_id": player_id, "seq": seq, "ts": ts,
+                         "context": context, "metric_key": key, "value": float(val)})
+    return rows
+
+
+def _stamp(epoch):
+    """Rapsodo's per-shot ids are epoch seconds; anything else is not a time."""
+    try:
+        return datetime.fromtimestamp(float(epoch), tz=timezone.utc) if epoch else None
+    except (ValueError, OverflowError, OSError):
+        return None
+
 
 # 0 and 4 were confirmed by reproducing the Rapsodo UI's own per-type averages
 # against the raw shots. 6, 3 and 5 were confirmed by Ian from their pitch
@@ -176,6 +244,8 @@ def load(dry_run: bool = True) -> dict:
         "sessions_written": 0,
         "sessions_existing": 0,
         "metrics_written": 0,
+        "hit_sessions": 0,
+        "swings_written": 0,
         "shots_kept": 0,
         "shots_dropped": 0,
         "vendor_links": 0,
@@ -252,13 +322,35 @@ def load(dry_run: bool = True) -> dict:
 
             epoch = sess.get("date") or sess.get("startedAt")
             session_date = datetime.fromtimestamp(epoch, tz=timezone.utc).date()
-            source_ref = sess.get("_id") or sess.get("objectID")
+            vendor_ref = sess.get("_id") or sess.get("objectID")
+
+            # The archive folder name is the shot type pull.py asked for, and
+            # it decides everything below: which table, which session type,
+            # which vocabulary the split column carries, and what the ref is.
+            is_hit = shot_type == "hit"
+            # A Rapsodo HITTING session is a GROUP session -- one id shared by
+            # every hitter in the cage that day (the 2026-09-17 machine session
+            # had 30+ players under one id). sessions is unique on (source,
+            # source_ref), so the stored ref carries the player too; pitching
+            # sessions are one arm each and keep the bare id.
+            source_ref = f"{vendor_ref}:{rap_player_id}" if is_hit else vendor_ref
 
             existing = conn.execute(
                 select(db.sessions.c.id)
                 .where(db.sessions.c.source == VENDOR)
                 .where(db.sessions.c.source_ref == source_ref)
+                .where(db.sessions.c.player_id == player_id)
             ).first()
+            if existing is None and is_hit:
+                # A row filed under the bare id before refs carried the player
+                # (the 2026-09-20 mis-load). Found by id AND player, it is
+                # repaired in place below and re-keyed to the per-player ref.
+                existing = conn.execute(
+                    select(db.sessions.c.id)
+                    .where(db.sessions.c.source == VENDOR)
+                    .where(db.sessions.c.source_ref == vendor_ref)
+                    .where(db.sessions.c.player_id == player_id)
+                ).first()
 
             # Provenance: keep the untouched payload in raw_imports too, so the
             # database alone is enough to re-derive everything.
@@ -268,52 +360,24 @@ def load(dry_run: bool = True) -> dict:
             stats["shots_kept"] += len(valid)
             stats["shots_dropped"] += len(shots) - len(valid)
 
-            rows = []
-            for seq, shot in enumerate(sorted(valid, key=lambda s: s.get("pitch_id") or 0), 1):
-                code = shot.get("pitchType")
-                ptype = map_pitch_type(code)
-                if ptype is None and code is not None:
-                    stats["unmapped_pitch_types"][code] = (
-                        stats["unmapped_pitch_types"].get(code, 0) + 1
+            if is_hit:
+                context = metrics.normalize_context(sess.get("sessionType"))
+                if context is None and sess.get("sessionType"):
+                    stats.setdefault("untagged_hit_types", {})
+                    stats["untagged_hit_types"][sess["sessionType"]] = (
+                        stats["untagged_hit_types"].get(sess["sessionType"], 0) + 1
                     )
-
-                ts = None
-                if shot.get("pitch_id"):
-                    ts = datetime.fromtimestamp(shot["pitch_id"], tz=timezone.utc)
-
-                for field, key in PITCH_METRIC_MAP.items():
-                    val = shot.get(field)
-                    if val is None:
-                        continue
-                    rows.append(
-                        {
-                            "player_id": player_id,
-                            "seq": seq,
-                            "ts": ts,
-                            "pitch_type": ptype,
-                            "metric_key": key,
-                            "value": float(val),
-                        }
-                    )
-                    # The registry tracks fastball velocity separately from
-                    # overall velocity, and it's a headline metric.
-                    if key == "velocity" and ptype == "FB":
-                        rows.append(
-                            {
-                                "player_id": player_id,
-                                "seq": seq,
-                                "ts": ts,
-                                "pitch_type": ptype,
-                                "metric_key": "fb_velocity",
-                                "value": float(val),
-                            }
-                        )
+                rows = _hit_rows(valid, player_id, context)
+                stats["hit_sessions"] += 1
+                stats["swings_written"] += len(rows)
+            else:
+                rows = _pitch_rows(valid, player_id, stats)
+                stats["metrics_written"] += len(rows)
 
             if existing:
                 stats["sessions_existing"] += 1
             else:
                 stats["sessions_written"] += 1
-            stats["metrics_written"] += len(rows)
 
             if dry_run:
                 continue
@@ -339,13 +403,21 @@ def load(dry_run: bool = True) -> dict:
                     ).returning(db.raw_imports.c.id)
                 ).scalar()
 
+            table = db.swings if is_hit else db.pitch_metrics
             if existing:
                 session_id = existing.id
-                # Re-ingest is idempotent: replace this session's metrics.
+                # Re-ingest is idempotent: replace this session's rows. BOTH
+                # tables are cleared, not just the right one, so a session that
+                # was once filed on the wrong side (the 2026-09-20 mis-load put
+                # hitting sessions in pitch_metrics as bullpens) is repaired by
+                # simply loading it again -- no hand surgery in production.
+                for t in (db.pitch_metrics, db.swings):
+                    conn.execute(delete(t).where(t.c.session_id == session_id))
                 conn.execute(
-                    delete(db.pitch_metrics).where(
-                        db.pitch_metrics.c.session_id == session_id
-                    )
+                    update(db.sessions)
+                    .where(db.sessions.c.id == session_id)
+                    .values(session_type="cage" if is_hit else "bullpen",
+                            source_ref=source_ref)
                 )
             else:
                 session_id = conn.execute(
@@ -353,7 +425,9 @@ def load(dry_run: bool = True) -> dict:
                     .values(
                         player_id=player_id,
                         session_date=session_date,
-                        session_type="bullpen",
+                        # "cage" is what Blast sessions carry too, so a hitter's
+                        # training history is one list whichever device saw it.
+                        session_type="cage" if is_hit else "bullpen",
                         source=VENDOR,
                         source_ref=source_ref,
                         notes=sess.get("sessionName"),
@@ -364,7 +438,7 @@ def load(dry_run: bool = True) -> dict:
 
             if rows:
                 conn.execute(
-                    insert(db.pitch_metrics),
+                    insert(table),
                     [{**r, "session_id": session_id} for r in rows],
                 )
 
@@ -415,8 +489,12 @@ def main() -> int:
 
     print(f"{'DRY RUN' if dry else 'COMMITTED'} -- {db.database_url().split('@')[-1]}")
     for k in ("files", "sessions_written", "sessions_existing",
-              "shots_kept", "shots_dropped", "metrics_written", "vendor_links"):
+              "shots_kept", "shots_dropped", "metrics_written",
+              "hit_sessions", "swings_written", "vendor_links"):
         print(f"  {k:<20} {stats[k]}")
+    if stats.get("untagged_hit_types"):
+        print(f"  hitting session types with no drill mapping (stored untagged): "
+              f"{stats['untagged_hit_types']}")
     if stats["unresolved"]:
         stranded = sum(i["sessions"] for i in stats["unresolved"].values())
         print(f"  not on the roster -- queued for review, NOT created "

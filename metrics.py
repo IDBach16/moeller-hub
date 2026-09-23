@@ -252,7 +252,10 @@ _CONTEXT_ALIASES = {
     "soft_toss": ["soft toss", "soft toss underhand", "soft toss overhand",
                   "front toss", "flips"],
     "machine": ["pitching machine", "machine", "iron mike"],
-    "live": ["live pitch", "live pitching", "live at bats", "live abs", "live bp"],
+    # "live batting practice" is Rapsodo Hitting's session type, not a Blast tag;
+    # the two devices share this vocabulary so a hitter's live work is one drill.
+    "live": ["live pitch", "live pitching", "live at bats", "live abs", "live bp",
+             "live batting practice"],
     "practice": ["general practice", "practice", "batting practice", "bp"],
 }
 

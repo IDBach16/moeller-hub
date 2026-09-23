@@ -535,6 +535,9 @@ def create_app():
         # him against his TEAMMATES, this says whether he is where Blast says a
         # hitter at his level should be. Merging them means neither.
         blast_bench = percentiles.blast_benchmark(_engine(), p["player"]["id"])
+        # The ball, not the bat: Rapsodo batted balls, same drill-adjusted
+        # doctrine as the Blast strip, its own pool. "Rapsodo" in the dropdown.
+        batted = percentiles.batted_strip(_engine(), p["player"]["id"])
         # In-season, from the charted games -- the competition layer.
         awre_name = p["aliases"].get("awre") or p["player"]["name"]
         gyear = request.args.get("gyear")
@@ -547,7 +550,7 @@ def create_app():
         return render_template(
             "player.html", nav="players", p=p, card=card, slog=slog,
             strips=strips, game_strip=game_strip, game_bat=game_bat,
-            blast=blast, blast_bench=blast_bench,
+            blast=blast, blast_bench=blast_bench, batted=batted,
             writes_enabled=writes_enabled(),
             metric_options=development.goal_metric_options(),
             directions=db.GOAL_DIRECTIONS,

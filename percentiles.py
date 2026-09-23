@@ -844,10 +844,10 @@ def clear_blast_cache():
         _blast_cache.clear()
 
 
-def _cells(table, key):
+def _cells(table, key, min_n=BLAST_MIN_N):
     """{(player, drill): mean} for everyone over the sample floor on this metric."""
     return {pd: t[key] for pd, t in table.items()
-            if t.get(key) is not None and (t.get(key + "_n") or 0) >= BLAST_MIN_N}
+            if t.get(key) is not None and (t.get(key + "_n") or 0) >= min_n}
 
 
 def drill_effects(cells, iters=60):
@@ -891,15 +891,26 @@ def blast_strip(engine, player_id):
     two hitters appear in one order and rank in the other, which reads as a bug
     and destroys trust in the whole panel.
     """
-    table = _blast_table(engine)
+    out = _drill_strip(_blast_table(engine), player_id, BLAST_STRIP, "bat_speed")
+    if out:
+        out["swings"] = out.pop("n")
+    return out
+
+
+def _drill_strip(table, player_id, strip, count_key, provisional=False):
+    """The shared engine behind every cage strip (Blast swings, Rapsodo batted
+    balls): drill-adjusted where the roster can identify the offset, ranked
+    against everyone on the roster, unranked below the floor rather than drawn
+    faintly. `count_key` is the metric whose count is "how many reps he has".
+    `provisional` flags every ranked bar as not yet reliability-tested."""
     mine_drills = {d: t for (p, d), t in table.items() if p == player_id}
     if not mine_drills:
         return None
 
     bars, thin = [], []
     adjusted_any = False
-    for key, label, unit, higher_better, min_n, blurb in BLAST_STRIP:
-        cells = _cells(table, key)
+    for key, label, unit, higher_better, min_n, blurb in strip:
+        cells = _cells(table, key, min_n)
         grand, pe, de, n_linked = drill_effects(cells)
 
         # His own sample, across every drill that cleared the floor.
@@ -954,19 +965,144 @@ def blast_strip(engine, player_id):
         if pct is None:
             continue
         rank = pct if higher_better else 100 - pct
-        bar.update(pct=rank, ord=ordinal(rank), lower_better=not higher_better)
+        bar.update(pct=rank, ord=ordinal(rank), lower_better=not higher_better,
+                   provisional=provisional)
         bars.append(bar)
 
     if not bars and not thin:
         return None
 
     # What fed it, so the adjustment is visible rather than magic.
-    mix = sorted(((d, t.get("bat_speed_n") or 0) for d, t in mine_drills.items()),
+    mix = sorted(((d, t.get(count_key + "_n") or 0) for d, t in mine_drills.items()),
                  key=lambda kv: -kv[1])
     return {"bars": bars, "thin": thin, "adjusted": adjusted_any,
-            "swings": sum(n for _d, n in mix),
+            "n": sum(n for _d, n in mix),
             "drills": [{"drill": metrics.split_label(d), "n": n}
                        for d, n in mix if n]}
+
+
+# ===========================================================================
+# In the cage -- Rapsodo batted balls. "Rapsodo" in the rank dropdown.
+# ===========================================================================
+#
+# The same doctrine as the Blast strip, on the ball instead of the bat: one
+# strip, drill-adjusted, ranked against Moeller hitters, the value shown is the
+# value ranked, unranked below the floor. Rapsodo only -- HitTrax also measures
+# exit velocity, but camera and radar are different systems, so it gets its
+# own panel when it lands rather than being poured into this pool.
+#
+# Defaults set by Ian on 2026-09-23, before a reliability sweep was possible:
+BATTED_MIN_N = 15          # batted balls in ONE drill before that drill counts
+HARD_HIT_MPH = 90.0        # MLB's 95 is a pro number; revisit against the field
+SWEET_SPOT_DEG = (8.0, 32.0)   # Statcast's band
+# Every ranked bar here carries provisional=True until blast/reliability.py has
+# been run on ~10 hitters x 25 balls and anything under 0.60 is dropped.
+
+BATTED_STRIP = [
+    ("exit_velocity", "Exit velocity", "mph", True, BATTED_MIN_N,
+     "average off the bat"),
+    ("max_exit_velocity", "Max exit velocity", "mph", True, BATTED_MIN_N,
+     "his hardest ball"),
+    ("hard_hit_pct", "Hard-hit %", "%", True, BATTED_MIN_N,
+     "balls at %g mph or more" % HARD_HIT_MPH),
+    ("sweet_spot_pct", "Sweet-spot %", "%", True, BATTED_MIN_N,
+     "launch angle %g to %g degrees" % SWEET_SPOT_DEG),
+    ("max_distance", "Max distance", "ft", True, BATTED_MIN_N,
+     "his longest ball"),
+    # --- shown, never ranked ---
+    ("launch_angle", "Launch angle", "deg", None, BATTED_MIN_N,
+     "target band, not a high score"),
+    ("launch_direction", "Spray", "deg", None, BATTED_MIN_N,
+     "average direction off the bat"),
+    ("xwoba", "xwOBA", "", None, BATTED_MIN_N,
+     "Rapsodo's own composite -- shown, not ranked"),
+]
+
+_BATTED_KEYS = ("exit_velocity", "launch_angle", "distance", "launch_direction", "xwoba")
+_batted_lock = threading.Lock()
+_batted_cache = {}
+
+
+def _batted_table(engine):
+    """(player_id, drill) -> {metric: value, metric_n: count}, whole roster.
+
+    Unlike Blast, some of these are not means: max exit velocity and max
+    distance are maxima, hard-hit and sweet-spot are shares, and the two shares
+    need exit velocity and launch angle paired PER BALL. So the rows are pulled
+    once and pivoted here instead of aggregated in SQL. Cached like Blast's.
+    """
+    now = time.time()
+    with _batted_lock:
+        hit = _batted_cache.get("table")
+    if hit is not None and now - hit[0] < _BLAST_TTL:
+        return hit[1]
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(db.swings.c.player_id, db.swings.c.context,
+                   db.swings.c.session_id, db.swings.c.seq,
+                   db.swings.c.metric_key, db.swings.c.value)
+            .select_from(db.swings.join(
+                db.sessions, db.sessions.c.id == db.swings.c.session_id))
+            .where(db.sessions.c.source == "rapsodo")
+            .where(db.swings.c.metric_key.in_(_BATTED_KEYS))
+            .where(db.swings.c.value.isnot(None))
+            # Untagged balls adjust nothing and rank nobody, as with swings.
+            .where(db.swings.c.context.isnot(None))).all()
+
+    balls = {}
+    for r in rows:
+        balls.setdefault((r.player_id, r.context, r.session_id, r.seq), {})[r.metric_key] = float(r.value)
+
+    groups = {}
+    for (p, d, _s, _q), b in balls.items():
+        if "exit_velocity" not in b:          # a failed track is not a ball
+            continue
+        groups.setdefault((p, d), []).append(b)
+
+    table = {}
+    for pd, bs in groups.items():
+        ev = [b["exit_velocity"] for b in bs]
+        la = [b["launch_angle"] for b in bs if "launch_angle" in b]
+        dist = [b["distance"] for b in bs if "distance" in b]
+        direc = [b["launch_direction"] for b in bs if "launch_direction" in b]
+        xw = [b["xwoba"] for b in bs if "xwoba" in b]
+        lo, hi = SWEET_SPOT_DEG
+        t = {"exit_velocity": sum(ev) / len(ev), "exit_velocity_n": len(ev),
+             "max_exit_velocity": max(ev), "max_exit_velocity_n": len(ev),
+             "hard_hit_pct": 100.0 * sum(1 for v in ev if v >= HARD_HIT_MPH) / len(ev),
+             "hard_hit_pct_n": len(ev)}
+        if la:
+            t["sweet_spot_pct"] = 100.0 * sum(1 for v in la if lo <= v <= hi) / len(la)
+            t["sweet_spot_pct_n"] = len(la)
+            t["launch_angle"] = sum(la) / len(la); t["launch_angle_n"] = len(la)
+        if dist:
+            t["max_distance"] = max(dist); t["max_distance_n"] = len(dist)
+        if direc:
+            t["launch_direction"] = sum(direc) / len(direc); t["launch_direction_n"] = len(direc)
+        if xw:
+            t["xwoba"] = sum(xw) / len(xw); t["xwoba_n"] = len(xw)
+        table[pd] = t
+    with _batted_lock:
+        _batted_cache["table"] = (now, table)
+    return table
+
+
+def clear_batted_cache():
+    with _batted_lock:
+        _batted_cache.clear()
+
+
+def batted_strip(engine, player_id):
+    """The "Rapsodo" panel: his batted balls in the cage, drill-adjusted and
+    ranked against every Moeller hitter with Rapsodo hitting data."""
+    out = _drill_strip(_batted_table(engine), player_id, BATTED_STRIP,
+                       "exit_velocity", provisional=True)
+    if out:
+        out["balls"] = out.pop("n")
+        out["hard_hit_mph"] = HARD_HIT_MPH
+        out["sweet_spot"] = SWEET_SPOT_DEG
+    return out
 
 
 def _player_level(engine, player_id, season=2026):
