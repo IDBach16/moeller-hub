@@ -992,7 +992,10 @@ def _drill_strip(table, player_id, strip, count_key, provisional=False):
 # own panel when it lands rather than being poured into this pool.
 #
 # Defaults set by Ian on 2026-09-23, before a reliability sweep was possible:
-BATTED_MIN_N = 15          # batted balls in ONE drill before that drill counts
+BATTED_MIN_N = 5           # batted balls in ONE drill before that drill counts.
+                           # Ian, 2026-09-23: "doesn't matter the limit right
+                           # now, I want to see what it looks like" -- a
+                           # see-it setting; raise it with the reliability sweep
 HARD_HIT_MPH = 90.0        # MLB's 95 is a pro number; revisit against the field
 SWEET_SPOT_DEG = (8.0, 32.0)   # Statcast's band
 # Every ranked bar here carries provisional=True until blast/reliability.py has

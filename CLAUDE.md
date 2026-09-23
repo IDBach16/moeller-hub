@@ -398,7 +398,9 @@ balls, two-way players included.
 Defaults Ian set before a reliability sweep was possible -- every ranked bar
 carries `provisional=True` and the panel says so:
 
-- `BATTED_MIN_N = 15` balls in one drill before that drill counts
+- `BATTED_MIN_N = 5` balls in one drill before that drill counts -- lowered from 15
+  the same day at Ian's request so ranks show at all (10 hitters clear 12; only 4
+  clear 15). A see-it setting: raise it with the reliability sweep
 - `HARD_HIT_MPH = 90` (MLB's 95 is a pro number)
 - `SWEET_SPOT_DEG = (8, 32)` (Statcast's band)
 - ranked: exit velocity, max exit velocity, hard-hit %, sweet-spot %, max
