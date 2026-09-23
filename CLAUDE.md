@@ -492,6 +492,25 @@ the `mkdir` did what it said.
   construction. Useful relative marker, bad absolute one. Replace with an external
   benchmark when there is one worth trusting.
 
+## Postgres-only bugs: the model is not the migration
+
+Three production outages so far were invisible to every local test because
+SQLite databases are created from `db.py` while production is built by the
+alembic chain, and the two had drifted:
+
+1. `sessions.session_type String(20)` overflowed on "Live Batting Practice"
+   (SQLite accepts overflow; Postgres aborts) -- `c3f5a91d4e27`.
+2. `pitch_type String(4)` rejected "soft_toss" -- `a1c7f2e9b035`.
+3. `player_baselines` primary key never got `pitch_type` -- the model keyed
+   baselines per pitch/drill from the start, production keyed them per metric,
+   and the second drill of one hitter to end on the same day collided and
+   killed change detection for the run -- `e7b3c9d2a4f1` (2026-09-23).
+
+When you change `db.py`, write the migration in the same commit, and when you
+add a column to a key, check `information_schema` in production, not the model.
+`migrate.upgrade_to_head()` runs at web startup; the `[startup] migrate:` log
+line says whether it applied.
+
 ## Identity
 
 `players.id` **is** the Moeller Player ID. Never reused, never changed. Everything
