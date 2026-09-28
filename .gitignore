@@ -29,3 +29,6 @@ blast/exports/
 # Playwright screenshots + HTML dumps from blast/pull_export.py failures.
 # Can contain a login screen with the account email; never commit.
 blast/diagnostics/
+
+# per-run agent logs (JSONL); ephemeral on Railway anyway
+logs/

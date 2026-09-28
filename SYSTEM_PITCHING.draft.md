@@ -318,3 +318,9 @@ are on other pitches and marked never-reuse; (5) cue preamble: one cue as a phra
 never the list. Pressure-tested on the same context without writing: the item became
 "Worth a pen of changeups thrown with the palm inside the ball, watching whether its
 axis moves a full hour off the fastball's 1:14 and its run clears 15 inches."
+
+### Voice settled (2026-09-28)
+The note is written ABOUT him, third person throughout (a coach reads it and hands it
+over); the chat is where he is spoken to. The `overview` examples that said "your slider"
+now say "his slider". Same day: the note gained an investigating-agent mode
+(`pitching_agent.py`) that reuses `<output>` and `<rules>` verbatim from this prompt.

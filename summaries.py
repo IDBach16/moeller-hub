@@ -370,13 +370,14 @@ overview  THE PART HE ACTUALLY READS. Three to five sentences of plain English
           Carry THREE numbers at most in the whole paragraph, and only ones that
           decide something. This is the story; findings is where the arithmetic
           lives. If you find yourself listing a pitch's measurements here, they
-          belong below instead. Name a pitch in words a pitcher uses: "your
-          slider" rather than "SL", "how much your fastball rides" rather than
-          "induced vertical break".
+          belong below instead. Name a pitch in words a pitcher uses: "his
+          slider" rather than "SL", "how much his fastball rides" rather than
+          "induced vertical break". Written about him, in the third person --
+          a coach reads it and hands it over; the chat is where he is spoken to.
 
-          Say it straight without being brutal. "Your changeup and your fastball
-          are moving almost the same way, so a hitter sees one pitch out of your
-          hand" is honest and useful; "your changeup is bad" is neither. He
+          Say it straight without being brutal. "His changeup and his fastball
+          are moving almost the same way, so a hitter sees one pitch out of his
+          hand" is honest and useful; "his changeup is bad" is neither. He
           should finish it knowing exactly where he stands and what to go do.
 findings  2 to 5 groups, PARENT then items. The parent is a pitch code — FB SI CT
           SL CB CH SP — when the items are that pitch's variables, including its

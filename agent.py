@@ -1819,9 +1819,17 @@ def answer(history, ip, focus=None, player=None):
     # Last, so every cached block above is shared with the coach chats and only
     # this player's own data is the uncached tail.
     tools = TOOLS
+    impls = TOOL_IMPLS
     if player:
         system_blocks.append({"type": "text", "text": PLAYER_CHAT.format(**player)})
         tools = [t for t in TOOLS if t["name"] not in PLAYER_TOOL_DENY]
+        if focus == "pitching":
+            # The investigating analyst's two arithmetic tools -- shape class
+            # and the separation / mirror verdicts -- so the chat computes them
+            # rather than the model doing clock arithmetic in its head.
+            import pitching_agent
+            tools = tools + pitching_agent.CHAT_TOOLS
+            impls = {**TOOL_IMPLS, **pitching_agent.CHAT_IMPLS}
 
     client = _anthropic()
     for _ in range(6):
@@ -1844,7 +1852,7 @@ def answer(history, ip, focus=None, player=None):
                 if block.type != "tool_use":
                     continue
                 try:
-                    out = TOOL_IMPLS[block.name](**block.input)
+                    out = impls[block.name](**block.input)
                     content = json.dumps(out, default=str)[:30000]
                     results.append({"type": "tool_result", "tool_use_id": block.id,
                                     "content": content})

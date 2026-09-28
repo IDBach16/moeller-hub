@@ -783,7 +783,19 @@ def create_app():
             return jsonify({"error": WRITES_OFF}), 403
         force = bool((request.get_json(silent=True) or {}).get("force"))
         try:
-            res = summaries.generate(engine, player_id, force=force)
+            # The Rewrite button runs the investigating agent for pitchers: it
+            # can pull a comparison before it concludes. The Monday job keeps
+            # the one-shot note -- cheap, cached, reproducible -- until a month
+            # of side-by-side notes says the agent's are better, not just longer.
+            import pitching_agent
+            with engine.connect() as conn:
+                is_pitcher = conn.execute(
+                    select(db.players.c.is_pitcher)
+                    .where(db.players.c.id == player_id)).scalar()
+            if force and is_pitcher and pitching_agent.enabled():
+                res = pitching_agent.investigate_and_store(engine, player_id, force=True)
+            else:
+                res = summaries.generate(engine, player_id, force=force)
             res["parsed"] = summaries.parse_note(res.get("summary"))
             return jsonify(res)
         except Exception as e:

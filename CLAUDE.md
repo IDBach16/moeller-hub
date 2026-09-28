@@ -119,6 +119,36 @@ and behind the password gate: `HUB_PASSWORD` IS set on this project's `web`
 (unlike the coaches' hub in `feisty-luck`, where the gate is off), so `/players/<id>`
 and `/api/players/<id>/ask` both 302 to `/login` for anyone not signed in.
 
+## The pitching analyst has two modes (2026-09-28)
+
+**One-shot** (`summaries.generate`, `SYSTEM_PITCHING`): one call over
+`build_context`. Cheap (~$0.11), cached by basis, reproducible. **Still the
+Monday default.**
+
+**Investigating agent** (`pitching_agent.py`): the same judgment with a tool
+loop -- `get_pitcher_context` and `what_changed` first, then it confirms before
+it concludes (`pitch_shape_report` before naming a shape, `separation_and_mirror`
+before saying two pitches blend or mirror, `compare_windows` before calling a
+change real, `game_pitching` before saying a pitch played), and ends with
+`submit_report`, whose input is validated against the note contract. Model
+`claude-opus-5-5`, cap 15 calls (then a forced submit with a caveat), every
+call logged to `logs/pitching_agent/*.jsonl`. Stored through the note's own
+basis/cache/`store()` with `model = "claude-opus-5-5 agent, N calls"`.
+
+Where it runs: the **Rewrite button** for pitchers (`PITCHING_AGENT=0` turns it
+off) and two of its tools in the player's pitching chat. The Monday batch stays
+one-shot until a month of side-by-side notes says the agent's are better, not
+just longer. Two sources by design: Rapsodo bullpens and the charted game data.
+
+Doctrine, enforced in code not prose: the prompt's `<output>` and `<rules>` are
+lifted from `SYSTEM_PITCHING` verbatim (`_section`), so the two modes cannot
+disagree on what a note is; tools wrap functions the hub already trusts
+(within-pitch comparisons, circular axis, floors); teammate-naming and
+coach-action tools are not offered; the note is written ABOUT him -- the voice
+question was settled the same day, third person in both modes, the chat is
+where he is spoken to. `test_pitching_agent.py` runs the loop against a scripted
+client: known-arsenal verdicts, rejected report, cap, log, storage.
+
 ## Thresholds are calibrated, not placeholders (2026-09-21)
 
 `metrics.py` `mmc` values were set from a season of our own data. Method: per
