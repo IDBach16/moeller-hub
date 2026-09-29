@@ -149,6 +149,37 @@ question was settled the same day, third person in both modes, the chat is
 where he is spoken to. `test_pitching_agent.py` runs the loop against a scripted
 client: known-arsenal verdicts, rejected report, cap, log, storage.
 
+## The hitting analyst has the same two modes -- with a provisional brain (2026-09-29)
+
+`hitting_agent.py` is `pitching_agent.py`'s twin: the same loop, cap, logging
+(`logs/hitting_agent/`), `submit_report` validated against `HITTING_PARENTS`,
+storage through the note's own basis/cache with `model = "claude-opus-5-5
+hitting agent, N calls"`, the same teammate/coach-action fence. Thirteen tools,
+every one wrapping something the hub already trusts: `get_hitter_context`,
+`swing_report` (`percentiles.blast_strip`), `batted_ball_report`
+(`batted_strip`, PROVISIONAL), `blast_benchmarks` (`blast_benchmark`),
+`what_changed`, `metric_history` and `compare_windows` **per drill** (a Blast
+metric without a drill is refused, batted-ball metrics may pool),
+`training_drill_mix`, `game_hitting` (`tool_season_batting`), `hittrax`,
+`goals_and_interventions`, `previous_note`, `submit_report`. Runs on the
+**Rewrite button** for hitters (`HITTING_AGENT=0` disables); three of its tools
+ride in the hitting chat. The Monday batch stays one-shot.
+
+**The judgment is not there yet, on purpose.** `SYSTEM_HITTING` is untouched
+(still the placeholder; see the OPEN note above) and is lifted verbatim as the
+agent's contract-and-rules block. What the agent adds is `HITTING_KNOWLEDGE`, a
+SCAFFOLD of repository facts only -- the registry's units, meanings, polarities
+and Moeller bands (generated from `metrics.REGISTRY` at import), the
+compare-within-a-drill rule with the measured offsets, the two band yardsticks
+and their caveats, the reliability floors, cage-vs-game -- ending in a marked
+`<coach_judgment_slot>` that says "do not invent any of it". It lives in
+`hitting_agent.py`, not `summaries.py`, so the placeholder prompt is not polished
+in passing. The prompt-builder interview fills the slot; when it does, put the
+knowledge in `summaries.HITTING_KNOWLEDGE` beside the pitching one and turn on
+the note's `overview` field in the same change. `test_hitting_agent.py` seeds a
+roster (tee vs live swings, Rapsodo balls, six teammates) and runs the loop
+against a scripted client, including a rejected report that used a pitching parent.
+
 ## Thresholds are calibrated, not placeholders (2026-09-21)
 
 `metrics.py` `mmc` values were set from a season of our own data. Method: per

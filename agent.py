@@ -1816,6 +1816,13 @@ def answer(history, ip, focus=None, player=None):
         import summaries
         system_blocks.append({"type": "text",
                               "text": summaries.PITCHING_KNOWLEDGE})
+    if focus == "hitting":
+        # The hitting side's doctrine block: units, the drill rule and its
+        # measured offsets, the two band yardsticks, floors. A scaffold of
+        # repository facts until the hitting interview fills the judgment slot;
+        # lives in hitting_agent.py so SYSTEM_HITTING itself stays untouched.
+        import hitting_agent
+        system_blocks.append({"type": "text", "text": hitting_agent.HITTING_KNOWLEDGE})
     # Last, so every cached block above is shared with the coach chats and only
     # this player's own data is the uncached tail.
     tools = TOOLS
@@ -1830,6 +1837,12 @@ def answer(history, ip, focus=None, player=None):
             import pitching_agent
             tools = tools + pitching_agent.CHAT_TOOLS
             impls = {**TOOL_IMPLS, **pitching_agent.CHAT_IMPLS}
+        elif focus == "hitting":
+            # Likewise for hitters: drill-adjusted swing ranks, batted-ball
+            # ranks and the Blast-band read, computed rather than estimated.
+            import hitting_agent
+            tools = tools + hitting_agent.CHAT_TOOLS
+            impls = {**TOOL_IMPLS, **hitting_agent.CHAT_IMPLS}
 
     client = _anthropic()
     for _ in range(6):
