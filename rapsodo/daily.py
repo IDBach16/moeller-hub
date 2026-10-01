@@ -12,8 +12,12 @@ Environment:
     RAPSODO_BACKFILL_DAYS              optional -- pull this many days back instead
                                        of just yesterday. Set to 365 for the first
                                        run, then remove it.
-    RAPSODO_LOOKBACK_DAYS              optional, default 3. Re-pulls the last N days
-                                       every night rather than only yesterday.
+    RAPSODO_LOOKBACK_DAYS              optional. Direct runs default to 3.
+                                       `python nightly.py` passes 7 when this
+                                       is unset, so the cron window is a week
+                                       and a laptop one-off is not. An explicit
+                                       value always wins (set it on rapsodo-cron
+                                       to pin the overnight window).
     DATABASE_URL                       the player-dev Postgres
     HUB_PATH                           where db.py / metrics.py live (default: cwd)
 
@@ -49,6 +53,9 @@ def main() -> int:
     # idempotent -- (source, source_ref) dedupes sessions, so a re-pull overwrites
     # rather than duplicates. Only pulling "yesterday" would silently miss late data.
     backfill = _int_env("RAPSODO_BACKFILL_DAYS", 0)
+    # 3, not 7. The overnight job injects 7 when the variable is unset
+    # (nightly.OVERNIGHT_RAPSODO_LOOKBACK_DAYS). Changing this default would
+    # also widen every local `python rapsodo/daily.py`.
     lookback = _int_env("RAPSODO_LOOKBACK_DAYS", 3)
     days = backfill or lookback
 

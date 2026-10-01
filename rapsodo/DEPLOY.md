@@ -61,50 +61,57 @@ resolves only inside Railway's network and local runs should stay `--dry-run`.
 
 ## Railway cron service
 
-Project `feisty-luck` (`3ec152ec-daea-4238-ac38-54f35852db1d`) currently holds:
-- `web` — the LIVE hub (`moeller-hub`, branch `main`). **Do not touch.**
-- `Postgres` — provisioned 2026-08-19; `web.DATABASE_URL` references it
+Player-dev runs in project **`wonderful-abundance`**: `web` (this branch),
+`Postgres`, `rapsodo-cron`, and `blast-cron`. The coaches' hub is a different
+project, **`feisty-luck`** — do not deploy this job there.
 
-### DEPLOYED 2026-08-19 — service `rapsodo-cron`
+### Service `rapsodo-cron`
 
-Config lives in **`railway.json` at the repo root**, left as an ordinary **untracked** file.
+Start command is **`python nightly.py`** (the Rapsodo pull is step 1 of that
+job). Schedule `0 9 * * *` (09:00 UTC ≈ 5am ET, after late device uploads).
+`restartPolicyType: NEVER` so a finished run waits for the next schedule instead
+of looping.
 
-⚠ **Do NOT add it to `.gitignore` or `.git/info/exclude`.** `railway up` walks the
-directory with git's ignore rules — including `.git/info/exclude` — so excluding the file
-by either route silently strips it out of the upload. The symptom is a green build that
-falls back to the repo's `Procfile` and deploys `gunicorn app:app` instead of the cron job,
-with `cronSchedule` empty and nothing ever running. Both mistakes were made here before
-landing on "just leave it untracked".
+`railway.json` at the repo root, when present, is an ordinary **untracked**
+file. Do not commit it, and do not add it to `.gitignore` or `.git/info/exclude`
+— `railway up` walks git's ignore rules, and excluding the file makes the build
+fall back to the `Procfile` (`gunicorn app:app`, no cron). The schedule and
+start command that actually run are the service-instance settings.
 
-⚠ It must also never be **committed**: on `main` it would override the LIVE hub's start
-command with this cron job's. Untracked is the whole balance — it ships, it can't be merged.
-
-```json
-{ "deploy": { "startCommand": "python rapsodo/daily.py",
-              "cronSchedule": "0 9 * * *",
-              "restartPolicyType": "NEVER" } }
-```
-
-`restartPolicyType: NEVER` matters: a cron service that restarts on exit would re-run the
-whole pull in a loop instead of waiting for the next schedule.
-
-Variables set on `rapsodo-cron`:
+Variables on `rapsodo-cron`:
 - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}` — a *reference*, so no credential is ever
   written into a command or this repo
-- `RAPSODO_EMAIL`
-- `RAPSODO_BACKFILL_DAYS=365` — **first run only, delete it afterwards** or every nightly
-  run re-pulls a full year
-- `RAPSODO_PASSWORD` — **must be set by Ian**; the job exits 2 without it
-
-Redeploy with `railway up --service rapsodo-cron` from this directory.
+- `RAPSODO_EMAIL` / `RAPSODO_PASSWORD` — the job exits 2 without the password
+- `RAPSODO_LOOKBACK_DAYS` — optional. Unset, `nightly.py` passes **7** into
+  `rapsodo/daily.py`. A direct `python rapsodo/daily.py` still defaults to 3.
+  Set this on the service to pin the overnight window (set `7` to make it
+  visible; another integer overrides the injected default).
+- `RAPSODO_STALE_AFTER_DAYS` — optional, read by `nightly.py`. Unset means
+  lookback + 2 (**9** when the overnight lookback is 7). When the more
+  recent of the newest session date and the last landed file is older than
+  that, the overnight subject is `ATTENTION` and the process exits non-zero. An empty
+  Cloud pull is still exit 0 from `daily.py`; this is what keeps a long quiet
+  stretch from looking green. Raise it in the off-season if an empty Cloud
+  should stay quiet.
+- `RAPSODO_BACKFILL_DAYS` — **first historical load only, then delete it**, or
+  every night re-pulls that many days
+- `GMAIL_APP_PASSWORD`, `ALERT_TO` — the nightly heartbeat
 
 09:00 UTC ≈ 5am ET, chosen to fall after late device uploads.
 
 ## Nightly behaviour
 
-Pulls a rolling `RAPSODO_LOOKBACK_DAYS` window (default 3) rather than only
-yesterday — devices upload late and can backdate. Re-pulling is idempotent: sessions
-dedupe on `(source, source_ref)` and a re-ingest replaces that session's metrics.
+The overnight job pulls a rolling window of **7 days** when
+`RAPSODO_LOOKBACK_DAYS` is unset (`nightly.py` injects it). A direct
+`python rapsodo/daily.py` still defaults to 3. Devices upload late and can
+backdate. Re-pulling is idempotent: sessions dedupe on `(source, source_ref)`
+and a re-ingest replaces that session's metrics.
+
+An empty window exits 0 — Cloud may legitimately have nothing, including in the
+off-season. `nightly.py` still marks the run `ATTENTION` once the more
+recent of the newest session date and the last landed file is older than
+`RAPSODO_STALE_AFTER_DAYS` (default: that lookback plus 2 days). The subject
+also carries the pull's `sessions_new` and `players_active` (or `0 players`).
 
 **Railway's filesystem is ephemeral**, so `raw/` and `out/` do not survive a redeploy.
 That is fine: `load_db.py` also writes each untouched payload into `raw_imports`, which

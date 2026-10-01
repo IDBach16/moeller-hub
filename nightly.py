@@ -17,7 +17,10 @@ In order:
                 nothing moved, so this costs one model call per player who
                 actually trained.
   4. freshness  newest data per source, and whether each vendor job has landed a
-                file recently enough
+                file recently enough. Rapsodo is silent -- not broken -- when
+                Cloud is empty for a night; it becomes a problem only after the
+                more recent of the newest session and the last landed file is
+                older than RAPSODO_STALE_AFTER_DAYS.
   5. record     one row in job_runs -- the durable proof the job finished
   6. email      a short daily heartbeat to ALERT_TO. Subject line is enough to
                 read. Absence of the email is itself the signal that the job
@@ -42,6 +45,22 @@ here, not two. Set on the service:
     ALERT_TO             recipient                (default: GMAIL_USER)
     ALERT_ONLY_ON_PROBLEM=1   to silence the daily OK heartbeat and mail only on trouble
 
+    RAPSODO_LOOKBACK_DAYS    how many days daily.py re-pulls. Unset here means
+                             7 for this job only (late device uploads, a week
+                             of backdating). A direct `python rapsodo/daily.py`
+                             still defaults to 3, so a local one-off does not
+                             inherit the overnight window. An explicit value
+                             always wins -- that is what Infra sets on
+                             rapsodo-cron.
+    RAPSODO_STALE_AFTER_DAYS days without a Rapsodo session or a newly landed
+                             file before the subject flips to ATTENTION and
+                             this process exits 1. Unset means lookback + 2
+                             (9 when the overnight lookback is 7): a session
+                             still inside the pull window is not a page, and
+                             one empty night is not either. Raise it in the
+                             off-season if a legitimately empty Cloud should
+                             stay green.
+
 With no password set, the job still runs everything and prints the report;
 it just cannot mail it.
 """
@@ -49,6 +68,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import smtplib
 import subprocess
 import sys
@@ -65,8 +85,133 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # How old a vendor's newest landed file may be before it counts as stale.
 # Blast runs Mondays, so > 8 days means a Monday was missed. HitTrax is on the
 # same weekly cadence once the vendor starts delivering. Rapsodo is pulled by
-# THIS job, so its staleness is the pull step's own exit code, not a date.
+# this job: an empty Cloud exits 0 (off-season is real), and its silence is
+# judged below from the newest session date and the last landed file.
 STALE_AFTER_DAYS = {"blast": 8, "hittrax": 8}
+
+# Applied only when nightly launches daily.py and RAPSODO_LOOKBACK_DAYS is
+# unset. daily.py's own default stays 3 so `python rapsodo/daily.py` on a
+# laptop does not suddenly pull a week.
+OVERNIGHT_RAPSODO_LOOKBACK_DAYS = 7
+
+_PLAYERS_RE = re.compile(r"\[players\] (\d+) active")
+_NEW_SESSIONS_RE = re.compile(r"\[rapsodo\] loaded: (\d+) new sessions")
+
+
+def _int_env(name: str):
+    """Parse a non-negative int env var. None when unset or not an integer."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        print(f"[nightly] {name}={raw!r} is not an integer; ignoring it")
+        return None
+    if n < 0:
+        print(f"[nightly] {name}={n} is negative; ignoring it")
+        return None
+    return n
+
+
+def overnight_lookback_days() -> int:
+    """Lookback nightly will hand to daily.py. Explicit env wins, including 0; else 7."""
+    explicit = _int_env("RAPSODO_LOOKBACK_DAYS")
+    if explicit is None:
+        return OVERNIGHT_RAPSODO_LOOKBACK_DAYS
+    return explicit
+
+
+def rapsodo_stale_after_days() -> int:
+    """Silence window. Explicit env wins; else two days past the overnight lookback.
+
+    Two days past the window means a session still being re-pulled is not
+    ATTENTION, and the first empty night after it falls out of the window
+    is not either. With the overnight default of 7 that is 9 days.
+    """
+    explicit = _int_env("RAPSODO_STALE_AFTER_DAYS")
+    if explicit is not None:
+        return explicit
+    return overnight_lookback_days() + 2
+
+
+def _as_date(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return None
+
+
+def rapsodo_silence(newest_session, last_file, today: date, limit: int) -> dict:
+    """Whether Rapsodo has been quiet long enough to page.
+
+    Evidence is the newer of the newest session date (pitching and hitting
+    together) and the last landed file. Identical re-pulls do not refresh
+    raw_imports.uploaded_at, so a file date only moves when a payload is new.
+    An empty pull is not itself a failure; this trips once that evidence is
+    older than ``limit`` days, or when nothing has ever landed.
+    """
+    session_d = _as_date(newest_session)
+    file_d = _as_date(last_file)
+    evidence = [d for d in (session_d, file_d) if d is not None]
+    if not evidence:
+        return {"status": "NEVER LANDED",
+                "problem": "rapsodo: no file has ever landed",
+                "evidence_age_days": None}
+    newest = max(evidence)
+    age = (today - newest).days
+    if age > limit:
+        sess = session_d.isoformat() if session_d else "-"
+        landed = file_d.isoformat() if file_d else "-"
+        return {
+            "status": f"STALE ({age}d, limit {limit})",
+            "problem": (f"rapsodo: silent for {age} days (limit {limit}); "
+                        f"newest session {sess}, last file {landed}"),
+            "evidence_age_days": age,
+        }
+    return {"status": "ok", "problem": None, "evidence_age_days": age}
+
+
+def rapsodo_counts(text: str) -> dict:
+    """sessions_new / players_active from daily.py's own log lines.
+
+    An empty Cloud prints ``[players] 0 active`` and ``no shots in window``
+    and exits 0. That is ``sessions_new=0`` and ``0 players``, not a failed pull.
+    """
+    players = _PLAYERS_RE.findall(text)
+    loaded = _NEW_SESSIONS_RE.findall(text)
+    players_active = int(players[-1]) if players else None
+    if loaded:
+        sessions_new = int(loaded[-1])
+    elif "no shots in window" in text or "[out] nothing to write" in text:
+        sessions_new = 0
+    else:
+        sessions_new = None
+    return {"sessions_new": sessions_new, "players_active": players_active}
+
+
+def rapsodo_ingest_phrase(step: dict) -> str:
+    """HitTrax-style counts for the subject. Zero players reads as ``0 players``."""
+    step = step or {}
+    if step.get("skipped"):
+        return "Rapsodo dry-run"
+    if step.get("ok") is False:
+        return "Rapsodo failed"
+    sessions_new = step.get("sessions_new")
+    players_active = step.get("players_active")
+    if sessions_new is None and players_active is None:
+        return "Rapsodo counts unavailable"
+    sessions = "?" if sessions_new is None else str(sessions_new)
+    if players_active == 0:
+        who = "0 players"
+    elif players_active is None:
+        who = "players_active=?"
+    else:
+        who = f"players_active={players_active}"
+    return f"Rapsodo sessions_new={sessions}, {who}"
 
 
 # --------------------------------------------------------------------------
@@ -87,20 +232,40 @@ def step(report: dict, name: str, fn):
         traceback.print_exc()
 
 
+def rapsodo_child_env() -> tuple[dict, int]:
+    """Env for the daily.py subprocess, plus the lookback it will actually use.
+
+    Copied, not applied to this process. Unset or unusable
+    RAPSODO_LOOKBACK_DAYS becomes 7 in the child only -- daily.py's own
+    default of 3 is what a direct local run still gets.
+    """
+    env = os.environ.copy()
+    lookback = overnight_lookback_days()
+    raw = os.environ.get("RAPSODO_LOOKBACK_DAYS", "").strip()
+    if raw != str(lookback):
+        env["RAPSODO_LOOKBACK_DAYS"] = str(lookback)
+    return env, lookback
+
+
 def pull_rapsodo(dry: bool):
     if dry:
         return {"skipped": "dry-run"}
+    env, lookback = rapsodo_child_env()
     r = subprocess.run([sys.executable, os.path.join(HERE, "rapsodo", "daily.py")],
-                       capture_output=True, text=True, cwd=HERE)
-    lines = (r.stdout + "\n" + r.stderr).strip().splitlines()
+                       capture_output=True, text=True, cwd=HERE, env=env)
+    text = r.stdout + "\n" + r.stderr
+    lines = text.strip().splitlines()
     for ln in lines[-8:]:
         print("   | " + ln)
+    counts = rapsodo_counts(text)
     if r.returncode != 0:
-        # 2 = auth (documented in daily.py), 1 = anything else
-        raise RuntimeError(f"rapsodo/daily.py exited {r.returncode}: "
-                           f"{lines[-1] if lines else '(no output)'}")
+        # 2 = auth (documented in daily.py), 1 = anything else.
+        detail = lines[-1] if lines else "(no output)"
+        raise RuntimeError(f"rapsodo/daily.py exited {r.returncode}: {detail}")
     loaded = next((ln for ln in lines if "[rapsodo] loaded" in ln), "")
-    return {"exit": 0, "loaded": loaded.replace("[rapsodo] ", "") or "nothing new"}
+    return {"exit": 0, "lookback_days": lookback,
+            "loaded": loaded.replace("[rapsodo] ", "") or "nothing new",
+            **counts}
 
 
 def detect_changes(engine, dry: bool):
@@ -152,28 +317,40 @@ def freshness(engine, today: date):
         row = {"newest_session": str(nd) if nd else None,
                "last_file_landed": lf.strftime("%Y-%m-%d") if lf else None,
                "sessions_last_30d": int(recent.get(src, 0))}
-        limit = STALE_AFTER_DAYS.get(src)
-        if limit:
-            if lf is None:
-                # HitTrax has never delivered; Blast should have. Say which.
-                row["status"] = "not live yet" if src == "hittrax" else "NEVER LANDED"
-                if src != "hittrax":
-                    problems.append(f"{src}: no file has ever landed")
-            else:
-                age = (datetime.now(timezone.utc).date() - lf.date()).days
-                row["file_age_days"] = age
-                if age > limit:
-                    row["status"] = f"STALE ({age}d, limit {limit})"
-                    problems.append(f"{src}: last file landed {age} days ago (limit {limit})")
-                else:
-                    row["status"] = "ok"
-        else:
-            row["status"] = "pulled by this job"
         if src == "rapsodo":
+            # Reported apart: a hitting session must not make a cold pitching
+            # unit look current. Silence is the account, so the date compared
+            # below is the newer of the two, which `nd` already is.
             pit, hit = by_type.get(("rapsodo", "bullpen")), by_type.get(("rapsodo", "cage"))
             row["newest_session"] = str(pit) if pit else None       # the pitching unit
             row["newest_pitching"] = str(pit) if pit else None
             row["newest_hitting"] = str(hit) if hit else None
+            limit = rapsodo_stale_after_days()
+            verdict = rapsodo_silence(nd, lf, today, limit)
+            row["status"] = verdict["status"]
+            row["stale_after_days"] = limit
+            if verdict["evidence_age_days"] is not None:
+                row["file_age_days"] = verdict["evidence_age_days"]
+            if verdict["problem"]:
+                problems.append(verdict["problem"])
+        else:
+            limit = STALE_AFTER_DAYS.get(src)
+            if limit:
+                if lf is None:
+                    # HitTrax has never delivered; Blast should have. Say which.
+                    row["status"] = "not live yet" if src == "hittrax" else "NEVER LANDED"
+                    if src != "hittrax":
+                        problems.append(f"{src}: no file has ever landed")
+                else:
+                    age = (datetime.now(timezone.utc).date() - lf.date()).days
+                    row["file_age_days"] = age
+                    if age > limit:
+                        row["status"] = f"STALE ({age}d, limit {limit})"
+                        problems.append(f"{src}: last file landed {age} days ago (limit {limit})")
+                    else:
+                        row["status"] = "ok"
+            else:
+                row["status"] = "pulled by this job"
         out[src] = row
     return {"sources": out, "stale": problems}
 
@@ -205,12 +382,18 @@ def compose(report: dict) -> tuple[str, str]:
     # string reason under the same key. Only the string means "did not run".
     written = "-" if isinstance(notes.get("skipped"), str) else notes.get("written", 0)
 
+    ingest = rapsodo_ingest_phrase(report["steps"].get("rapsodo", {}))
     subject = (f"Moeller nightly {'OK' if ok else 'ATTENTION'} -- "
-               f"Rapsodo pitching thru {d('rapsodo', 'newest_pitching')}, "
+               f"{ingest}, "
+               f"pitching thru {d('rapsodo', 'newest_pitching')}, "
                f"hitting thru {d('rapsodo', 'newest_hitting')}, "
                f"Blast thru {d('blast')}, {fired} changes, {written} notes")
 
     lines = [f"Nightly job -- {report['ran_at']}", ""]
+    rap = report["steps"].get("rapsodo", {})
+    if rap.get("lookback_days"):
+        lines.append(f"Rapsodo ingest: {ingest} (lookback {rap['lookback_days']}d)")
+        lines.append("")
     if report["problems"]:
         lines += ["PROBLEMS:"] + [f"  - {p}" for p in report["problems"]] + [""]
     lines.append("Data freshness:")
