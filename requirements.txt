@@ -7,3 +7,4 @@ SQLAlchemy==2.0.52
 psycopg2-binary==2.9.12
 beautifulsoup4==4.13.5
 alembic==1.19.1
+paramiko==5.0.0
