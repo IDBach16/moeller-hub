@@ -336,6 +336,34 @@ def seed_blast_column_maps(engine):
     return added
 
 
+def seed_hittrax_column_maps(engine):
+    """Pre-seed the collect-ready HitTrax headers. Idempotent.
+
+    The cron converts m/s and metres in ``hittrax/units.py`` before this CSV
+    exists, and ``ingest.save_mappings`` cannot store a scale other than 1.0.
+    A factor on this map would either be ignored or, if it were ever applied,
+    double-convert every exit velocity. A column a coach already confirmed is
+    left alone -- this only fills gaps, the same way the Blast seed does.
+    """
+    import metrics
+    from hittrax.join import COLLECT_COLUMNS
+    added = 0
+    with engine.begin() as conn:
+        have = {r.source_column for r in conn.execute(
+            select(db.column_maps.c.source_column).where(
+                db.column_maps.c.vendor == "hittrax"))}
+        for col, key in COLLECT_COLUMNS:
+            if col in have:
+                continue
+            spec = metrics.REGISTRY.get(key)
+            conn.execute(insert(db.column_maps).values(
+                vendor="hittrax", source_column=col, metric_key=key,
+                unit=(spec.unit if spec else None), scale=1.0,
+                confirmed_by="seed", confirmed_at=func.now()))
+            added += 1
+    return added
+
+
 def learn_blast_user_ids(engine, pairs, dry_run=False):
     """Record the Blast CSV's `user_id` for players an export resolved by name.
 
